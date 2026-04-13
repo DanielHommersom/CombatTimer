@@ -15,8 +15,20 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
+import TimeInput from '../components/TimeInput';
+import { RootStackParamList } from '../navigation/BottomTabNavigator';
+
+type WorkoutNav = NativeStackNavigationProp<RootStackParamList>;
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -38,6 +50,15 @@ function formatDuration(seconds: number): string {
   if (m > 0) parts.push(`${m} min`);
   if (s > 0 && h === 0) parts.push(`${s} sec`); // drop seconds once we have hours
   return parts.join(' ');
+}
+
+/** Returns true when a string is a correctly formatted, saveable time value. */
+function isValidTimeStr(s: string): boolean {
+  if (!s || !s.includes(':')) return false;
+  const [m, sec] = s.split(':');
+  const mins = parseInt(m);
+  const secs = parseInt(sec);
+  return !isNaN(mins) && !isNaN(secs) && secs <= 59 && mins >= 0;
 }
 
 function calcTotal(warmUp: string, rounds: number, roundTime: string, rest: string, coolDown: string): number {
@@ -83,7 +104,8 @@ function workoutToForm(w: Workout): FormState {
 // ─── WorkoutScreen ────────────────────────────────────────────────────────────
 
 export default function WorkoutScreen() {
-  const insets = useSafeAreaInsets();
+  const insets     = useSafeAreaInsets();
+  const navigation = useNavigation<WorkoutNav>();
   const { workouts, loading, addWorkout, updateWorkout, deleteWorkout } = useWorkouts();
 
   const sheetRef = useRef<BottomSheetModal>(null);
@@ -164,7 +186,11 @@ export default function WorkoutScreen() {
           }
           ListEmptyComponent={<EmptyState />}
           renderItem={({ item }) => (
-            <WorkoutCard workout={item} onEdit={() => openEdit(item)} />
+            <WorkoutCard
+              workout={item}
+              onEdit={() => openEdit(item)}
+              onPlay={() => navigation.navigate('ActiveTimer', { workout: item })}
+            />
           )}
         />
       )}
@@ -194,8 +220,27 @@ export default function WorkoutScreen() {
 
 // ─── WorkoutCard ──────────────────────────────────────────────────────────────
 
-function WorkoutCard({ workout, onEdit }: { workout: Workout; onEdit: () => void }) {
+function WorkoutCard({
+  workout,
+  onEdit,
+  onPlay,
+}: {
+  workout: Workout;
+  onEdit: () => void;
+  onPlay: () => void;
+}) {
   const totalSec = calcTotal(workout.warmUp, workout.rounds, workout.roundTime, workout.rest, workout.coolDown);
+
+  const scale    = useSharedValue(1);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+
+  function handlePlay() {
+    scale.value = withSpring(0.82, { damping: 12 }, () => {
+      'worklet';
+      scale.value = withSpring(1, { damping: 12 });
+      runOnJS(onPlay)();
+    });
+  }
 
   return (
     <View style={styles.card}>
@@ -203,9 +248,9 @@ function WorkoutCard({ workout, onEdit }: { workout: Workout; onEdit: () => void
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{workout.name}</Text>
         <View style={styles.cardMeta}>
-          <MetaPill icon="repeat-outline"        value={`${workout.rounds} rds`} />
-          <MetaPill icon="timer-outline"         value={workout.roundTime} />
-          <MetaPill icon="pause-circle-outline"  value={workout.rest} />
+          <MetaPill icon="repeat-outline"       value={`${workout.rounds} rds`} />
+          <MetaPill icon="timer-outline"        value={workout.roundTime} />
+          <MetaPill icon="pause-circle-outline" value={workout.rest} />
         </View>
         <Text style={styles.cardTotal}>~{formatDuration(totalSec)} total</Text>
       </View>
@@ -213,9 +258,11 @@ function WorkoutCard({ workout, onEdit }: { workout: Workout; onEdit: () => void
         <Pressable style={styles.iconBtn} onPress={onEdit} hitSlop={8}>
           <Ionicons name="create-outline" size={20} color="rgba(255,255,255,0.5)" />
         </Pressable>
-        <Pressable style={[styles.iconBtn, styles.playBtn]} hitSlop={8}>
-          <Ionicons name="play" size={16} color="#111" />
-        </Pressable>
+        <Animated.View style={[styles.playBtn, animStyle]}>
+          <Pressable style={styles.playBtnInner} onPress={handlePlay} hitSlop={8}>
+            <Ionicons name="play" size={16} color="#111" />
+          </Pressable>
+        </Animated.View>
       </View>
     </View>
   );
@@ -277,6 +324,11 @@ function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete }: 
     return (val: string) => onChange((prev) => ({ ...prev, [key]: val }));
   }
 
+  const canSave =
+    form.name.trim().length > 0 &&
+    isValidTimeStr(form.roundTime) &&
+    isValidTimeStr(form.rest);
+
   return (
     <BottomSheetScrollView
       contentContainerStyle={styles.formScroll}
@@ -301,13 +353,11 @@ function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete }: 
       />
 
       {/* Warm-up */}
-      <Text style={styles.formLabel}>WARM-UP</Text>
-      <BottomSheetTextInput
-        style={styles.input}
+      <TimeInput
+        label="WARM-UP"
         value={form.warmUp}
-        onChangeText={set('warmUp')}
+        onChange={set('warmUp')}
         placeholder="0:00"
-        placeholderTextColor="rgba(255,255,255,0.25)"
       />
 
       {/* Rounds + Round time + Rest */}
@@ -323,35 +373,31 @@ function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete }: 
           />
         </View>
         <View style={styles.formCol}>
-          <Text style={styles.formLabel}>ROUND TIME</Text>
-          <BottomSheetTextInput
-            style={styles.input}
+          <TimeInput
+            label="ROUND TIME"
             value={form.roundTime}
-            onChangeText={set('roundTime')}
+            onChange={set('roundTime')}
             placeholder="3:00"
-            placeholderTextColor="rgba(255,255,255,0.25)"
+            required
           />
         </View>
         <View style={styles.formCol}>
-          <Text style={styles.formLabel}>REST</Text>
-          <BottomSheetTextInput
-            style={styles.input}
+          <TimeInput
+            label="REST"
             value={form.rest}
-            onChangeText={set('rest')}
+            onChange={set('rest')}
             placeholder="1:00"
-            placeholderTextColor="rgba(255,255,255,0.25)"
+            required
           />
         </View>
       </View>
 
       {/* Cooling down */}
-      <Text style={styles.formLabel}>COOLING DOWN</Text>
-      <BottomSheetTextInput
-        style={styles.input}
+      <TimeInput
+        label="COOLING DOWN"
         value={form.coolDown}
-        onChangeText={set('coolDown')}
+        onChange={set('coolDown')}
         placeholder="0:00"
-        placeholderTextColor="rgba(255,255,255,0.25)"
       />
 
       {/* Color picker */}
@@ -377,7 +423,11 @@ function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete }: 
       </View>
 
       {/* Save */}
-      <Pressable style={styles.saveBtn} onPress={onSave}>
+      <Pressable
+        style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+        onPress={onSave}
+        disabled={!canSave}
+      >
         <Text style={styles.saveBtnText}>{isEditing ? 'Save changes' : 'Save workout'}</Text>
       </Pressable>
 
@@ -517,9 +567,12 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 17,
     backgroundColor: '#fff',
+    overflow: 'hidden',
+  },
+  playBtnInner: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 0,
   },
 
   // Bottom sheet
@@ -615,6 +668,9 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     alignItems: 'center',
     marginBottom: 12,
+  },
+  saveBtnDisabled: {
+    opacity: 0.4,
   },
   saveBtnText: {
     color: '#111',
