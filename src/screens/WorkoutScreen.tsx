@@ -18,7 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Animated, {
-  runOnJS,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -235,11 +234,8 @@ function WorkoutCard({
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   function handlePlay() {
-    scale.value = withSpring(0.82, { damping: 12 }, () => {
-      'worklet';
-      scale.value = withSpring(1, { damping: 12 });
-      runOnJS(onPlay)();
-    });
+    scale.value = withSpring(0.82, { damping: 20, stiffness: 400 });
+    onPlay();
   }
 
   return (

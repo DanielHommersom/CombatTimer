@@ -3,42 +3,73 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { audioManager } from '../logic/audioManager';
-import { WorkoutPhase, formatTime, parseTime } from '../logic/timerEngine';
+import {
+  CalcRemainingState,
+  WorkoutPhase,
+  calcRemaining,
+  parseTime,
+} from '../logic/timerEngine';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveTimer'>;
 
-// ─── Gradient map ─────────────────────────────────────────────────────────────
-
-const GRADIENTS: Record<WorkoutPhase, [string, string]> = {
-  ready:    ['#111111', '#1a1a1a'],
-  warmup:   ['#1a0d00', '#331a00'],
-  work:     ['#1a0000', '#330000'],
-  rest:     ['#00101a', '#001f33'],
-  cooldown: ['#0a001a', '#150033'],
-  done:     ['#001a0d', '#003319'],
-};
-
-// ─── Phase label ──────────────────────────────────────────────────────────────
-
-function phaseLabel(phase: WorkoutPhase, round: number, total: number): string {
-  switch (phase) {
-    case 'ready':    return 'READY';
-    case 'warmup':   return 'WARM UP';
-    case 'work':     return `ROUND ${round} / ${total}`;
-    case 'rest':     return 'REST';
-    case 'cooldown': return 'COOL DOWN';
-    case 'done':     return 'DONE';
-  }
-}
-
-// ─── Warning threshold ────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const WARNING_SECS = 10;
+
+const PHASE_COLOR: Record<WorkoutPhase, string> = {
+  ready:    '#ffffff',
+  warmup:   '#ffd60a',
+  work:     '#34c759',
+  rest:     '#ff453a',
+  cooldown: '#0a84ff',
+  done:     'rgba(255,255,255,0.4)',
+};
+
+const GRADIENT: Record<WorkoutPhase, [string, string]> = {
+  ready:    ['#111111', '#161616'],
+  warmup:   ['#111111', '#1a1400'],
+  work:     ['#111111', '#0d1a0d'],
+  rest:     ['#111111', '#0d0014'],
+  cooldown: ['#111111', '#00101a'],
+  done:     ['#111111', '#111111'],
+};
+
+// ─── Display helpers ──────────────────────────────────────────────────────────
+
+function fmtMSS(secs: number): string {
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function fmtHMSS(secs: number): string {
+  if (secs < 3600) return fmtMSS(secs);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function phaseName(phase: WorkoutPhase, round: number): string {
+  switch (phase) {
+    case 'ready':    return 'Ready';
+    case 'warmup':   return 'Warm-up';
+    case 'work':     return `Round ${round}`;
+    case 'rest':     return 'Rest';
+    case 'cooldown': return 'Cooling down';
+    case 'done':     return 'Done';
+  }
+}
 
 // ─── TimerScreen ──────────────────────────────────────────────────────────────
 
@@ -48,7 +79,7 @@ export default function TimerScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { workout } = route.params;
 
-  // ── Constants derived from workout (never change) ─────────────────────────
+  // ── Workout constants ─────────────────────────────────────────────────────
   const totalRounds  = workout.rounds;
   const warmUpSecs   = parseTime(workout.warmUp);
   const roundSecs    = parseTime(workout.roundTime);
@@ -63,34 +94,69 @@ export default function TimerScreen({ route, navigation }: Props) {
   const [currentRound, setCurrentRound] = useState(1);
   const [secsLeft, setSecsLeft]         = useState(initialSecs);
   const [isRunning, setIsRunning]       = useState(false);
+  const [elapsed, setElapsed]           = useState(0);
 
-  // Refs keep interval callback in sync without stale closures
+  // Refs for interval (avoid stale closures)
   const phaseRef    = useRef(initialPhase);
   const secsRef     = useRef(initialSecs);
   const roundRef    = useRef(1);
-  const runningRef  = useRef(false);
+  const elapsedRef  = useRef(0);
 
-  phaseRef.current   = phase;
-  secsRef.current    = secsLeft;
-  roundRef.current   = currentRound;
-  runningRef.current = isRunning;
+  phaseRef.current  = phase;
+  secsRef.current   = secsLeft;
+  roundRef.current  = currentRound;
+
+  // ── Progress bar animation ────────────────────────────────────────────────
+  const progressSV   = useSharedValue(1);
+  const prevPhase    = useRef(initialPhase);
+
+  function getPhaseDuration(p: WorkoutPhase): number {
+    switch (p) {
+      case 'warmup':   return warmUpSecs;
+      case 'work':
+      case 'ready':    return roundSecs;
+      case 'rest':     return restSecs;
+      case 'cooldown': return coolDownSecs;
+      default:         return 0;
+    }
+  }
+
+  useEffect(() => {
+    const dur      = getPhaseDuration(phase);
+    const newValue = dur > 0 ? secsLeft / dur : 0;
+    const changed  = prevPhase.current !== phase;
+    prevPhase.current = phase;
+
+    if (changed) {
+      // Instant reset to full on phase change
+      progressSV.value = newValue;
+    } else {
+      progressSV.value = withTiming(newValue, { duration: isRunning ? 950 : 0 });
+    }
+  }, [secsLeft, phase]);
+
+  const progressStyle = useAnimatedStyle(() => ({
+    width: `${progressSV.value * 100}%` as `${number}%`,
+  }));
 
   // ── Interval ──────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isRunning) return;
 
     const id = setInterval(() => {
+      // Elapsed
+      elapsedRef.current += 1;
+      setElapsed(elapsedRef.current);
+
+      // Countdown
       const next = secsRef.current - 1;
       if (next > 0) {
         secsRef.current = next;
         setSecsLeft(next);
-
-        // Warning cue
         if (next === WARNING_SECS) audioManager.playWarning();
         return;
       }
 
-      // next === 0 → transition
       advancePhase();
     }, 1000);
 
@@ -98,14 +164,14 @@ export default function TimerScreen({ route, navigation }: Props) {
   }, [isRunning]);
 
   // ── Phase transitions ────────────────────────────────────────────────────
-  function set(
+  function setState(
     newPhase: WorkoutPhase,
     newSecs: number,
     newRound = roundRef.current,
   ) {
-    phaseRef.current  = newPhase;
-    secsRef.current   = newSecs;
-    roundRef.current  = newRound;
+    phaseRef.current = newPhase;
+    secsRef.current  = newSecs;
+    roundRef.current = newRound;
     setPhase(newPhase);
     setSecsLeft(newSecs);
     setCurrentRound(newRound);
@@ -117,7 +183,7 @@ export default function TimerScreen({ route, navigation }: Props) {
 
     switch (p) {
       case 'warmup':
-        set('work', roundSecs, 1);
+        setState('work', roundSecs, 1);
         audioManager.playStart();
         break;
 
@@ -125,16 +191,15 @@ export default function TimerScreen({ route, navigation }: Props) {
         const isLast = r >= totalRounds;
         if (!isLast) {
           if (restSecs > 0) {
-            set('rest', restSecs);
+            setState('rest', restSecs);
             audioManager.playRest();
           } else {
-            set('work', roundSecs, r + 1);
+            setState('work', roundSecs, r + 1);
             audioManager.playStart();
           }
         } else {
-          // Last round finished
           if (coolDownSecs > 0) {
-            set('cooldown', coolDownSecs);
+            setState('cooldown', coolDownSecs);
           } else {
             finish();
           }
@@ -143,7 +208,7 @@ export default function TimerScreen({ route, navigation }: Props) {
       }
 
       case 'rest':
-        set('work', roundSecs, r + 1);
+        setState('work', roundSecs, r + 1);
         audioManager.playStart();
         break;
 
@@ -168,24 +233,22 @@ export default function TimerScreen({ route, navigation }: Props) {
       phaseRef.current = 'work';
       setPhase('work');
       audioManager.playStart();
-    } else if (phase === 'warmup') {
-      audioManager.playStart();
     }
     setIsRunning(true);
   }
 
-  function handlePause() {
-    setIsRunning(false);
-  }
+  function handlePause() { setIsRunning(false); }
 
   function handleReset() {
     setIsRunning(false);
     phaseRef.current  = initialPhase;
     secsRef.current   = initialSecs;
     roundRef.current  = 1;
+    elapsedRef.current = 0;
     setPhase(initialPhase);
     setSecsLeft(initialSecs);
     setCurrentRound(1);
+    setElapsed(0);
   }
 
   function handleBack() {
@@ -200,40 +263,76 @@ export default function TimerScreen({ route, navigation }: Props) {
     }
   }
 
-  // ── Derived display values ────────────────────────────────────────────────
-  const gradient = GRADIENTS[phase];
+  // ── Derived values ────────────────────────────────────────────────────────
+  const color    = PHASE_COLOR[phase];
+  const gradient = GRADIENT[phase];
   const isActive = phase !== 'ready' && phase !== 'done';
-  const isWarn   = isActive && secsLeft <= WARNING_SECS && secsLeft > 0;
-  const timeColor = isWarn ? '#ffd60a' : '#ffffff';
-  const label     = phaseLabel(phase, currentRound, totalRounds);
   const showBack  = phase === 'ready' || phase === 'done';
   const showReset = isActive || phase === 'done';
 
-  return (
-    <LinearGradient colors={gradient} style={[styles.container, { paddingTop: insets.top }]}>
+  const remainingState: CalcRemainingState = {
+    phase,
+    secsLeft,
+    totalRounds,
+    currentRound,
+    roundSecs,
+    restSecs,
+    coolDownSecs,
+  };
+  const remaining = calcRemaining(remainingState);
 
-      {/* Back button — only in ready / done */}
+  const isFirstStart =
+    phase === 'ready' ||
+    (phase === initialPhase && secsLeft === initialSecs && !isRunning);
+
+  return (
+    <LinearGradient
+      colors={gradient}
+      style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom + 32 }]}
+    >
+      {/* ── Top bar ──────────────────────────────────────────────────────── */}
       <View style={styles.topBar}>
         {showBack ? (
-          <Pressable style={styles.backBtn} onPress={handleBack} hitSlop={12}>
+          <Pressable onPress={handleBack} hitSlop={12}>
             <Text style={styles.backText}>← Back</Text>
           </Pressable>
         ) : (
-          /* Invisible placeholder keeps layout stable */
-          <View style={styles.backBtn} />
+          <View />
         )}
       </View>
 
-      {/* Workout name */}
-      <Text style={styles.workoutName} numberOfLines={1}>{workout.name}</Text>
-
-      {/* Main display */}
-      <View style={styles.displayArea}>
-        <Text style={styles.phaseLabel}>{label}</Text>
-        <Text style={[styles.time, { color: timeColor }]}>{formatTime(secsLeft)}</Text>
+      {/* ── Phase header ─────────────────────────────────────────────────── */}
+      <View style={styles.phaseHeader}>
+        <Text style={styles.phaseName}>{phaseName(phase, currentRound)}</Text>
+        <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
       </View>
 
-      {/* Controls */}
+      {/* ── Main timer ───────────────────────────────────────────────────── */}
+      <View style={styles.displayArea}>
+        <Text style={[styles.timerText, { color }]}>{fmtMSS(secsLeft)}</Text>
+      </View>
+
+      {/* ── Progress bar ─────────────────────────────────────────────────── */}
+      <View style={styles.progressBg}>
+        <Animated.View style={[styles.progressFill, progressStyle, { backgroundColor: color }]} />
+      </View>
+
+      {/* ── Stats row ────────────────────────────────────────────────────── */}
+      <View style={styles.statsRow}>
+        <View style={styles.statCol}>
+          <Text style={styles.statLabel}>ELAPSED</Text>
+          <Text style={styles.statValue}>{fmtMSS(elapsed)}</Text>
+        </View>
+
+        <View style={styles.statDivider} />
+
+        <View style={[styles.statCol, styles.statColRight]}>
+          <Text style={styles.statLabel}>REMAINING</Text>
+          <Text style={styles.statValue}>{fmtHMSS(remaining)}</Text>
+        </View>
+      </View>
+
+      {/* ── Controls ─────────────────────────────────────────────────────── */}
       <View style={styles.controls}>
         {showReset && (
           <Pressable style={styles.secondaryBtn} onPress={handleReset}>
@@ -247,11 +346,7 @@ export default function TimerScreen({ route, navigation }: Props) {
           </Pressable>
         ) : phase !== 'done' ? (
           <Pressable style={styles.primaryBtn} onPress={handleStart}>
-            <Text style={styles.primaryBtnText}>
-              {phase === 'ready' || (initialPhase === 'warmup' && phase === 'warmup' && secsLeft === initialSecs)
-                ? 'START'
-                : 'RESUME'}
-            </Text>
+            <Text style={styles.primaryBtnText}>{isFirstStart ? 'START' : 'RESUME'}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -262,18 +357,15 @@ export default function TimerScreen({ route, navigation }: Props) {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingBottom: 48,
   },
+
+  // Top bar
   topBar: {
     height: 44,
     justifyContent: 'center',
-  },
-  backBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 4,
   },
   backText: {
     color: 'rgba(255,255,255,0.5)',
@@ -281,65 +373,114 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     letterSpacing: 0.5,
   },
-  workoutName: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 13,
-    letterSpacing: 2,
-    fontWeight: '600',
-    textTransform: 'uppercase',
+
+  // Phase header
+  phaseHeader: {
     marginBottom: 4,
   },
+  phaseName: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  workoutSubtitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    fontWeight: '400',
+    marginTop: 2,
+  },
+
+  // Main timer
   displayArea: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
   },
-  phaseLabel: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 4,
-  },
-  time: {
-    fontSize: 96,
-    fontWeight: '700',
+  timerText: {
+    fontSize: 80,
+    fontWeight: '500',
     fontVariant: ['tabular-nums'],
-    letterSpacing: 2,
+    letterSpacing: -3,
+    includeFontPadding: false,
   },
+
+  // Progress bar
+  progressBg: {
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginBottom: 28,
+  },
+  progressFill: {
+    height: 3,
+    borderRadius: 2,
+  },
+
+  // Stats row
+  statsRow: {
+    flexDirection: 'row',
+    marginBottom: 28,
+  },
+  statCol: {
+    flex: 1,
+    gap: 4,
+  },
+  statColRight: {
+    alignItems: 'flex-end',
+  },
+  statDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginHorizontal: 20,
+  },
+  statLabel: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    fontWeight: '500',
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  statValue: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
+  },
+
+  // Controls
   controls: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
   },
   primaryBtn: {
+    flex: 1,
     backgroundColor: '#fff',
     paddingVertical: 16,
-    paddingHorizontal: 40,
     borderRadius: 8,
-    minWidth: 140,
     alignItems: 'center',
   },
   primaryBtnText: {
     color: '#111',
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
   secondaryBtn: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
     paddingVertical: 16,
     paddingHorizontal: 24,
     borderRadius: 8,
     alignItems: 'center',
     borderWidth: 0.5,
     borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   secondaryBtnText: {
     color: 'rgba(255,255,255,0.6)',
     fontSize: 15,
     fontWeight: '600',
-    letterSpacing: 2,
+    letterSpacing: 1.5,
   },
 });

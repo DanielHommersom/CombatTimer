@@ -61,6 +61,48 @@ export function isWarning(state: TimerState): boolean {
 
 export type WorkoutPhase = 'ready' | 'warmup' | 'work' | 'rest' | 'cooldown' | 'done';
 
+// ─── Workout remaining-time calculator ───────────────────────────────────────
+
+export interface CalcRemainingState {
+  phase:        WorkoutPhase;
+  secsLeft:     number;
+  totalRounds:  number;
+  currentRound: number;
+  roundSecs:    number;
+  restSecs:     number;
+  coolDownSecs: number;
+}
+
+/**
+ * Returns the total seconds left until the end of the entire session,
+ * including the currently active phase and everything that follows.
+ */
+export function calcRemaining(s: CalcRemainingState): number {
+  let total = s.secsLeft;
+
+  if (s.phase === 'warmup') {
+    total += s.totalRounds * s.roundSecs;
+    total += (s.totalRounds - 1) * s.restSecs;
+    if (s.coolDownSecs > 0) total += s.coolDownSecs;
+
+  } else if (s.phase === 'work' || s.phase === 'ready') {
+    const roundsAfter = s.totalRounds - s.currentRound;
+    total += roundsAfter * s.restSecs;
+    total += roundsAfter * s.roundSecs;
+    if (s.coolDownSecs > 0) total += s.coolDownSecs;
+
+  } else if (s.phase === 'rest') {
+    const roundsAfter = s.totalRounds - s.currentRound;
+    total += roundsAfter * s.roundSecs;
+    total += (roundsAfter - 1) * s.restSecs;
+    if (s.coolDownSecs > 0) total += s.coolDownSecs;
+
+  }
+  // 'cooldown' and 'done': secsLeft is already the full answer
+
+  return Math.max(0, total);
+}
+
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 /** "3:00" → 180. Returns 0 for empty or un-parseable input. */
