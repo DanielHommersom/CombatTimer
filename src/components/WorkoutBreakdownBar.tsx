@@ -1,10 +1,5 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
 
 export interface WorkoutBreakdownBarProps {
   warmUp:    string;
@@ -21,6 +16,13 @@ const SEGMENT_COLORS = {
   coolDown:  '#0a84ff',
 };
 
+type SegmentType = keyof typeof SEGMENT_COLORS;
+
+interface Segment {
+  type:  SegmentType;
+  secs:  number;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseTime(str: string): number {
@@ -33,6 +35,29 @@ function formatTime(secs: number): string {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return `${m}:${String(s).padStart(2, '0')}`;
+}
+
+function buildSegments(
+  warmUp: string,
+  rounds: number,
+  roundTime: string,
+  rest: string,
+  coolDown: string,
+): Segment[] {
+  const warmUpSecs   = parseTime(warmUp);
+  const roundSecs    = parseTime(roundTime);
+  const restSecs     = parseTime(rest);
+  const coolDownSecs = parseTime(coolDown);
+  const r            = Math.max(1, rounds);
+
+  const segs: Segment[] = [];
+  if (warmUpSecs > 0) segs.push({ type: 'warmUp', secs: warmUpSecs });
+  for (let i = 0; i < r; i++) {
+    if (roundSecs > 0) segs.push({ type: 'roundTime', secs: roundSecs });
+    if (restSecs > 0 && i < r - 1) segs.push({ type: 'rest', secs: restSecs });
+  }
+  if (coolDownSecs > 0) segs.push({ type: 'coolDown', secs: coolDownSecs });
+  return segs;
 }
 
 // ─── LegendItem ───────────────────────────────────────────────────────────────
@@ -78,30 +103,13 @@ export default function WorkoutBreakdownBar({
   rest,
   coolDown,
 }: WorkoutBreakdownBarProps) {
+  const segments  = buildSegments(warmUp, rounds, roundTime, rest, coolDown);
+  const totalSecs = segments.reduce((sum, s) => sum + s.secs, 0);
+
   const warmUpSecs   = parseTime(warmUp);
-  const roundsSecs   = rounds * parseTime(roundTime);
-  const restSecs     = Math.max(0, rounds - 1) * parseTime(rest);
+  const roundsSecs   = Math.max(1, rounds) * parseTime(roundTime);
+  const restSecs     = Math.max(0, Math.max(1, rounds) - 1) * parseTime(rest);
   const coolDownSecs = parseTime(coolDown);
-  const totalSecs    = warmUpSecs + roundsSecs + restSecs + coolDownSecs;
-
-  const toPercent = (secs: number) => (totalSecs > 0 ? (secs / totalSecs) * 100 : 0);
-
-  const warmUpW   = useSharedValue(toPercent(warmUpSecs));
-  const roundsW   = useSharedValue(toPercent(roundsSecs));
-  const restW     = useSharedValue(toPercent(restSecs));
-  const coolDownW = useSharedValue(toPercent(coolDownSecs));
-
-  useEffect(() => {
-    warmUpW.value   = withTiming(toPercent(warmUpSecs),   { duration: 300 });
-    roundsW.value   = withTiming(toPercent(roundsSecs),   { duration: 300 });
-    restW.value     = withTiming(toPercent(restSecs),     { duration: 300 });
-    coolDownW.value = withTiming(toPercent(coolDownSecs), { duration: 300 });
-  }, [warmUpSecs, roundsSecs, restSecs, coolDownSecs]);
-
-  const warmUpStyle   = useAnimatedStyle(() => ({ width: `${warmUpW.value}%`   as `${number}%` }));
-  const roundsStyle   = useAnimatedStyle(() => ({ width: `${roundsW.value}%`   as `${number}%` }));
-  const restStyle     = useAnimatedStyle(() => ({ width: `${restW.value}%`     as `${number}%` }));
-  const coolDownStyle = useAnimatedStyle(() => ({ width: `${coolDownW.value}%` as `${number}%` }));
 
   return (
     <View style={styles.root}>
@@ -111,15 +119,24 @@ export default function WorkoutBreakdownBar({
         <Text style={styles.totalValue}>{formatTime(totalSecs)}</Text>
       </View>
 
-      {/* Segmented bar */}
+      {/* Segmented bar — segments in actual workout order */}
       <View style={styles.bar}>
-        <Animated.View style={[styles.segment, { backgroundColor: SEGMENT_COLORS.warmUp },    warmUpStyle]}   />
-        <Animated.View style={[styles.segment, { backgroundColor: SEGMENT_COLORS.roundTime }, roundsStyle]}   />
-        <Animated.View style={[styles.segment, { backgroundColor: SEGMENT_COLORS.rest },      restStyle]}     />
-        <Animated.View style={[styles.segment, { backgroundColor: SEGMENT_COLORS.coolDown },  coolDownStyle]} />
+        {totalSecs > 0 ? (
+          segments.map((seg, i) => (
+            <View
+              key={i}
+              style={[
+                styles.segment,
+                { flex: seg.secs, backgroundColor: SEGMENT_COLORS[seg.type] },
+              ]}
+            />
+          ))
+        ) : (
+          <View style={styles.emptyBar} />
+        )}
       </View>
 
-      {/* Legend */}
+      {/* Legend (totals per phase) */}
       {totalSecs > 0 && (
         <View style={styles.legendRow}>
           {warmUpSecs   > 0 && <LegendItem color={SEGMENT_COLORS.warmUp}    label="Warm-up"   value={formatTime(warmUpSecs)}   />}
@@ -164,6 +181,9 @@ const styles = StyleSheet.create({
   },
   segment: {
     height: '100%',
+  },
+  emptyBar: {
+    flex: 1,
   },
   legendRow: {
     flexDirection: 'row',
