@@ -24,9 +24,11 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
+import { Preset } from '../data/presets';
 import TimePill from '../components/TimePill';
 import TimePickerModal from '../components/TimePickerModal';
 import WorkoutBreakdownBar from '../components/WorkoutBreakdownBar';
+import TemplateScreen from './TemplateScreen';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
 
 type WorkoutNav = NativeStackNavigationProp<RootStackParamList>;
@@ -83,7 +85,7 @@ function calcTotal(warmUp: string, rounds: number, roundTime: string, rest: stri
   );
 }
 
-// ─── Form helpers ──────────────────────────────────────────────────────────────
+// ─── Form helpers ─────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
   name:      '',
@@ -91,6 +93,16 @@ const EMPTY_FORM = {
   rounds:    '3',
   roundTime: '3:00',
   rest:      '1:00',
+  coolDown:  '0:00',
+  color:     COLOR_OPTIONS[0],
+};
+
+const SCRATCH_FORM = {
+  name:      '',
+  warmUp:    '0:00',
+  rounds:    '',
+  roundTime: '',
+  rest:      '',
   coolDown:  '0:00',
   color:     COLOR_OPTIONS[0],
 };
@@ -117,11 +129,20 @@ export default function WorkoutScreen() {
   const { workouts, loading, addWorkout, updateWorkout, deleteWorkout } = useWorkouts();
 
   const sheetRef = useRef<BottomSheetModal>(null);
-  const [editing, setEditing]         = useState<Workout | null>(null);
-  const [form, setForm]               = useState<FormState>(EMPTY_FORM);
-  const [activePicker, onPickerChange] = useState<PickerField>(null);
+  const [editing, setEditing]               = useState<Workout | null>(null);
+  const [form, setForm]                     = useState<FormState>(EMPTY_FORM);
+  const [activePicker, onPickerChange]      = useState<PickerField>(null);
+  const [templateVisible, setTemplateVisible] = useState(false);
+  const [toastMsg, setToastMsg]             = useState('');
 
   const snapPoints = useMemo(() => SNAP_POINTS, []);
+
+  const lastWorkout = useMemo(
+    () => workouts.length > 0
+      ? [...workouts].sort((a, b) => b.createdAt - a.createdAt)[0]
+      : null,
+    [workouts],
+  );
 
   function openAdd() {
     setEditing(null);
@@ -159,6 +180,22 @@ export default function WorkoutScreen() {
       await deleteWorkout(editing.id);
       sheetRef.current?.dismiss();
     }
+  }
+
+  function handleSelectPreset(preset: Preset | null) {
+    setForm(preset === null ? SCRATCH_FORM : {
+      name:      preset.name,
+      warmUp:    preset.warmUp,
+      rounds:    String(preset.rounds),
+      roundTime: preset.roundTime,
+      rest:      preset.rest,
+      coolDown:  preset.coolDown,
+      color:     preset.color,
+    });
+    setTemplateVisible(false);
+    const msg = preset ? `${preset.name} loaded` : 'Starting fresh';
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(''), 2000);
   }
 
   const renderBackdrop = useCallback(
@@ -223,10 +260,12 @@ export default function WorkoutScreen() {
           onDelete={handleDelete}
           activePicker={activePicker}
           onPickerChange={onPickerChange}
+          onShowTemplates={() => setTemplateVisible(true)}
+          toastMsg={toastMsg}
         />
       </BottomSheetModal>
 
-      {/* TimePickerModal buiten BottomSheetModal om touch-conflicten te vermijden */}
+      {/* TimePickerModal outside BottomSheetModal to avoid touch conflicts */}
       <TimePickerModal
         visible={activePicker !== null}
         value={activePicker !== null ? (form[activePicker] || '0:00') : '0:00'}
@@ -237,6 +276,14 @@ export default function WorkoutScreen() {
           onPickerChange(null);
         }}
         onClose={() => onPickerChange(null)}
+      />
+
+      {/* TemplateScreen outside BottomSheetModal */}
+      <TemplateScreen
+        visible={templateVisible}
+        onSelect={handleSelectPreset}
+        onClose={() => setTemplateVisible(false)}
+        lastWorkout={lastWorkout}
       />
     </View>
   );
@@ -268,7 +315,6 @@ function WorkoutCard({
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{workout.name}</Text>
 
-        {/* Phase pills */}
         <View style={styles.cardPills}>
           {parseTime(workout.warmUp) > 0 && (
             <TimePill value={workout.warmUp} color={PHASE_COLORS.warmUp} size="sm" onPress={() => {}} />
@@ -322,125 +368,135 @@ interface FormProps {
   onDelete: () => void;
   activePicker: PickerField;
   onPickerChange: (field: PickerField) => void;
+  onShowTemplates: () => void;
+  toastMsg: string;
 }
 
-function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete, onPickerChange }: FormProps) {
+function WorkoutForm({
+  form, onChange, isEditing, onSave, onCancel, onDelete,
+  onPickerChange, onShowTemplates, toastMsg,
+}: FormProps) {
   const canSave = form.name.trim().length > 0 && parseTime(form.roundTime) > 0;
 
   return (
-    <>
-      <BottomSheetScrollView
-        contentContainerStyle={styles.formScroll}
-        keyboardShouldPersistTaps="handled"
-      >
-        {/* Title row */}
-        <View style={styles.formHeader}>
-          <Text style={styles.formTitle}>{isEditing ? 'Edit workout' : 'New workout'}</Text>
-          <Pressable onPress={onCancel} hitSlop={8}>
-            <Ionicons name="close" size={22} color="rgba(255,255,255,0.5)" />
-          </Pressable>
-        </View>
+    <BottomSheetScrollView
+      contentContainerStyle={styles.formScroll}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Title row */}
+      <View style={styles.formHeader}>
+        <Text style={styles.formTitle}>{isEditing ? 'Edit workout' : 'New workout'}</Text>
+        <Pressable onPress={onCancel} hitSlop={8}>
+          <Ionicons name="close" size={22} color="rgba(255,255,255,0.5)" />
+        </Pressable>
+      </View>
 
-        {/* Name */}
-        <Text style={styles.formLabel}>NAME</Text>
+      {/* Name + Template button */}
+      <Text style={styles.formLabel}>NAME</Text>
+      <View style={styles.nameRow}>
         <BottomSheetTextInput
-          style={styles.input}
+          style={[styles.input, styles.nameInput]}
           value={form.name}
           onChangeText={(v) => onChange((p) => ({ ...p, name: v }))}
           placeholder="e.g. Boxing rounds"
           placeholderTextColor="rgba(255,255,255,0.25)"
         />
-
-        {/* Rounds */}
-        <Text style={styles.formLabel}>ROUNDS</Text>
-        <BottomSheetTextInput
-          style={[styles.input, styles.inputRounds]}
-          value={form.rounds}
-          onChangeText={(v) => onChange((p) => ({ ...p, rounds: v }))}
-          keyboardType="number-pad"
-          maxLength={2}
-        />
-
-        {/* Time fields */}
-        <View style={styles.timeSection}>
-          <View style={styles.timeRow}>
-            <Text style={styles.timeRowLabel}>Warm-up</Text>
-            <TimePill
-              value={form.warmUp}
-              color={PHASE_COLORS.warmUp}
-              onPress={() => onPickerChange('warmUp')}
-            />
-          </View>
-          <View style={styles.timeRow}>
-            <Text style={styles.timeRowLabel}>Round time</Text>
-            <TimePill
-              value={form.roundTime}
-              color={PHASE_COLORS.roundTime}
-              onPress={() => onPickerChange('roundTime')}
-            />
-          </View>
-          <View style={styles.timeRow}>
-            <Text style={styles.timeRowLabel}>Rest</Text>
-            <TimePill
-              value={form.rest}
-              color={PHASE_COLORS.rest}
-              onPress={() => onPickerChange('rest')}
-            />
-          </View>
-          <View style={[styles.timeRow, styles.timeRowLast]}>
-            <Text style={styles.timeRowLabel}>Cooling down</Text>
-            <TimePill
-              value={form.coolDown}
-              color={PHASE_COLORS.coolDown}
-              onPress={() => onPickerChange('coolDown')}
-            />
-          </View>
-        </View>
-
-        {/* Color picker */}
-        <Text style={styles.formLabel}>COLOR</Text>
-        <View style={styles.colorRow}>
-          {COLOR_OPTIONS.map((c) => (
-            <Pressable
-              key={c}
-              style={[
-                styles.colorDot,
-                { backgroundColor: c },
-                form.color === c && styles.colorDotActive,
-              ]}
-              onPress={() => onChange((p) => ({ ...p, color: c }))}
-            />
-          ))}
-        </View>
-
-        {/* Breakdown bar */}
-        <View style={styles.divider} />
-        <WorkoutBreakdownBar
-          warmUp={form.warmUp}
-          rounds={parseInt(form.rounds) || 1}
-          roundTime={form.roundTime}
-          rest={form.rest}
-          coolDown={form.coolDown}
-        />
-        <View style={styles.divider} />
-
-        {/* Save */}
-        <Pressable
-          style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-          onPress={onSave}
-          disabled={!canSave}
-        >
-          <Text style={styles.saveBtnText}>{isEditing ? 'Save changes' : 'Save workout'}</Text>
+        <Pressable style={styles.templateBtn} onPress={onShowTemplates}>
+          <Text style={styles.templateBtnLabel}>Template</Text>
+          <Text style={styles.templateBtnChevron}>›</Text>
         </Pressable>
+      </View>
+      {toastMsg !== '' && <Text style={styles.toastMsg}>{toastMsg}</Text>}
 
-        {/* Delete (edit only) */}
-        {isEditing && (
-          <Pressable style={styles.deleteBtn} onPress={onDelete}>
-            <Text style={styles.deleteBtnText}>Delete workout</Text>
-          </Pressable>
-        )}
-      </BottomSheetScrollView>
-    </>
+      {/* Rounds */}
+      <Text style={styles.formLabel}>ROUNDS</Text>
+      <BottomSheetTextInput
+        style={[styles.input, styles.inputRounds]}
+        value={form.rounds}
+        onChangeText={(v) => onChange((p) => ({ ...p, rounds: v }))}
+        keyboardType="number-pad"
+        maxLength={2}
+      />
+
+      {/* Time fields */}
+      <View style={styles.timeSection}>
+        <View style={styles.timeRow}>
+          <Text style={styles.timeRowLabel}>Warm-up</Text>
+          <TimePill
+            value={form.warmUp || '0:00'}
+            color={PHASE_COLORS.warmUp}
+            onPress={() => onPickerChange('warmUp')}
+          />
+        </View>
+        <View style={styles.timeRow}>
+          <Text style={styles.timeRowLabel}>Round time</Text>
+          <TimePill
+            value={form.roundTime || '0:00'}
+            color={PHASE_COLORS.roundTime}
+            onPress={() => onPickerChange('roundTime')}
+          />
+        </View>
+        <View style={styles.timeRow}>
+          <Text style={styles.timeRowLabel}>Rest</Text>
+          <TimePill
+            value={form.rest || '0:00'}
+            color={PHASE_COLORS.rest}
+            onPress={() => onPickerChange('rest')}
+          />
+        </View>
+        <View style={[styles.timeRow, styles.timeRowLast]}>
+          <Text style={styles.timeRowLabel}>Cooling down</Text>
+          <TimePill
+            value={form.coolDown || '0:00'}
+            color={PHASE_COLORS.coolDown}
+            onPress={() => onPickerChange('coolDown')}
+          />
+        </View>
+      </View>
+
+      {/* Color picker */}
+      <Text style={styles.formLabel}>COLOR</Text>
+      <View style={styles.colorRow}>
+        {COLOR_OPTIONS.map((c) => (
+          <Pressable
+            key={c}
+            style={[
+              styles.colorDot,
+              { backgroundColor: c },
+              form.color === c && styles.colorDotActive,
+            ]}
+            onPress={() => onChange((p) => ({ ...p, color: c }))}
+          />
+        ))}
+      </View>
+
+      {/* Breakdown bar */}
+      <View style={styles.divider} />
+      <WorkoutBreakdownBar
+        warmUp={form.warmUp || '0:00'}
+        rounds={parseInt(form.rounds) || 1}
+        roundTime={form.roundTime || '0:00'}
+        rest={form.rest || '0:00'}
+        coolDown={form.coolDown || '0:00'}
+      />
+      <View style={styles.divider} />
+
+      {/* Save */}
+      <Pressable
+        style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+        onPress={onSave}
+        disabled={!canSave}
+      >
+        <Text style={styles.saveBtnText}>{isEditing ? 'Save changes' : 'Save workout'}</Text>
+      </Pressable>
+
+      {/* Delete (edit only) */}
+      {isEditing && (
+        <Pressable style={styles.deleteBtn} onPress={onDelete}>
+          <Text style={styles.deleteBtnText}>Delete workout</Text>
+        </Pressable>
+      )}
+    </BottomSheetScrollView>
   );
 }
 
@@ -616,6 +672,44 @@ const styles = StyleSheet.create({
   },
   inputRounds: {
     width: 80,
+  },
+
+  // Name row with template button
+  nameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 20,
+  },
+  nameInput: {
+    flex: 1,
+    marginBottom: 0,
+  },
+  templateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 10,
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+  },
+  templateBtnLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  templateBtnChevron: {
+    color: 'rgba(255,255,255,0.3)',
+    fontSize: 16,
+  },
+  toastMsg: {
+    color: '#34c759',
+    fontSize: 12,
+    marginTop: -12,
+    marginBottom: 16,
   },
 
   // Time section
