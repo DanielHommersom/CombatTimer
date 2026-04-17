@@ -11,10 +11,10 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { audioManager } from '../logic/audioManager';
 import {
-  CalcRemainingState,
-  WorkoutPhase,
-  calcRemaining,
-  parseTime,
+  Phase,
+  PhaseStep,
+  buildPhaseSteps,
+  calcRemainingFromSteps,
 } from '../logic/timerEngine';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
 
@@ -26,19 +26,17 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ActiveTimer'>;
 
 const WARNING_SECS = 10;
 
-const PHASE_COLOR: Record<WorkoutPhase, string> = {
-  ready:    '#ffffff',
+const PHASE_COLOR: Record<Phase, string> = {
   warmup:   '#ffd60a',
-  work:     '#34c759',
+  round:    '#34c759',
   rest:     '#ff453a',
   cooldown: '#0a84ff',
   done:     'rgba(255,255,255,0.4)',
 };
 
-const GRADIENT: Record<WorkoutPhase, [string, string]> = {
-  ready:    ['#111111', '#161616'],
+const GRADIENT: Record<Phase, [string, string]> = {
   warmup:   ['#111111', '#1a1400'],
-  work:     ['#111111', '#0d1a0d'],
+  round:    ['#111111', '#0d1a0d'],
   rest:     ['#111111', '#0d0014'],
   cooldown: ['#111111', '#00101a'],
   done:     ['#111111', '#111111'],
@@ -60,15 +58,35 @@ function fmtHMSS(secs: number): string {
   return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
-function phaseName(phase: WorkoutPhase, round: number): string {
-  switch (phase) {
-    case 'ready':    return 'Ready';
-    case 'warmup':   return 'Warm-up';
-    case 'work':     return `Round ${round}`;
-    case 'rest':     return 'Rest';
-    case 'cooldown': return 'Cooling down';
-    case 'done':     return 'Done';
-  }
+// ─── ArrowButton ──────────────────────────────────────────────────────────────
+
+interface ArrowButtonProps {
+  direction: 'left' | 'right';
+  disabled: boolean;
+  onPress: () => void;
+}
+
+function ArrowButton({ direction, disabled, onPress }: ArrowButtonProps) {
+  const pressed = useSharedValue(0);
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: withTiming(disabled ? 0.2 : pressed.value ? 0.9 : 0.5, { duration: 100 }),
+    transform: [{ scale: withTiming(pressed.value ? 0.92 : 1, { duration: 100 }) }],
+  }));
+
+  return (
+    <Pressable
+      onPressIn={() => { if (!disabled) pressed.value = 1; }}
+      onPressOut={() => { pressed.value = 0; }}
+      onPress={onPress}
+      disabled={disabled}
+      style={styles.arrowBtn}
+    >
+      <Animated.Text style={[styles.arrowText, animStyle]}>
+        {direction === 'left' ? '‹' : '›'}
+      </Animated.Text>
+    </Pressable>
+  );
 }
 
 // ─── TimerScreen ──────────────────────────────────────────────────────────────
@@ -79,61 +97,57 @@ export default function TimerScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const { workout } = route.params;
 
-  // ── Workout constants ─────────────────────────────────────────────────────
-  const totalRounds  = workout.rounds;
-  const warmUpSecs   = parseTime(workout.warmUp);
-  const roundSecs    = parseTime(workout.roundTime);
-  const restSecs     = parseTime(workout.rest);
-  const coolDownSecs = parseTime(workout.coolDown);
-
-  const initialPhase: WorkoutPhase = warmUpSecs > 0 ? 'warmup' : 'ready';
-  const initialSecs                = warmUpSecs > 0 ? warmUpSecs : roundSecs;
+  // ── Steps (immutable for the session) ────────────────────────────────────
+  const [steps] = useState<PhaseStep[]>(() => buildPhaseSteps(workout));
 
   // ── Timer state ───────────────────────────────────────────────────────────
-  const [phase, setPhase]               = useState<WorkoutPhase>(initialPhase);
-  const [currentRound, setCurrentRound] = useState(1);
-  const [secsLeft, setSecsLeft]         = useState(initialSecs);
-  const [isRunning, setIsRunning]       = useState(false);
-  const [elapsed, setElapsed]           = useState(0);
+  const [currentStepIndex, setCurrentStepIndex] = useState(0);
+  const [secsLeft, setSecsLeft]                 = useState(steps[0].durationSecs);
+  const [isRunning, setIsRunning]               = useState(false);
+  const [elapsed, setElapsed]                   = useState(0);
+  const [isDone, setIsDone]                     = useState(false);
 
   // Refs for interval (avoid stale closures)
-  const phaseRef    = useRef(initialPhase);
-  const secsRef     = useRef(initialSecs);
-  const roundRef    = useRef(1);
-  const elapsedRef  = useRef(0);
+  const currentStepIndexRef = useRef(0);
+  const secsRef             = useRef(steps[0].durationSecs);
+  const elapsedRef          = useRef(0);
 
-  phaseRef.current  = phase;
-  secsRef.current   = secsLeft;
-  roundRef.current  = currentRound;
+  currentStepIndexRef.current = currentStepIndex;
+  secsRef.current             = secsLeft;
+
+  // ── Derived ───────────────────────────────────────────────────────────────
+  const currentPhase: Phase = isDone ? 'done' : steps[currentStepIndex].phase;
+  const color     = PHASE_COLOR[currentPhase];
+  const gradient  = GRADIENT[currentPhase];
+  const isAtStart = !isRunning && elapsed === 0 && !isDone;
+  const showBack  = isAtStart || isDone;
+  const showReset = !isAtStart;
+  const remaining = isDone ? 0 : calcRemainingFromSteps(steps, currentStepIndex, secsLeft);
+  const phaseLabel   = isDone ? 'Done' : steps[currentStepIndex].label;
+  const prevDisabled = isDone || currentStepIndex === 0;
+  const nextDisabled = isDone || currentStepIndex >= steps.length - 1;
 
   // ── Progress bar animation ────────────────────────────────────────────────
-  const progressSV   = useSharedValue(1);
-  const prevPhase    = useRef(initialPhase);
-
-  function getPhaseDuration(p: WorkoutPhase): number {
-    switch (p) {
-      case 'warmup':   return warmUpSecs;
-      case 'work':
-      case 'ready':    return roundSecs;
-      case 'rest':     return restSecs;
-      case 'cooldown': return coolDownSecs;
-      default:         return 0;
-    }
-  }
+  const progressSV  = useSharedValue(1);
+  const prevStepIdx = useRef(0);
 
   useEffect(() => {
-    const dur      = getPhaseDuration(phase);
+    if (isDone) {
+      progressSV.value = withTiming(0, { duration: 500 });
+      prevStepIdx.current = -1;
+      return;
+    }
+    const dur      = steps[currentStepIndex].durationSecs;
     const newValue = dur > 0 ? secsLeft / dur : 0;
-    const changed  = prevPhase.current !== phase;
-    prevPhase.current = phase;
+    const changed  = prevStepIdx.current !== currentStepIndex;
+    prevStepIdx.current = currentStepIndex;
 
     if (changed) {
-      // Instant reset to full on phase change
       progressSV.value = newValue;
     } else {
       progressSV.value = withTiming(newValue, { duration: isRunning ? 950 : 0 });
     }
-  }, [secsLeft, phase]);
+  }, [secsLeft, currentStepIndex, isDone]);
 
   const progressStyle = useAnimatedStyle(() => ({
     width: `${progressSV.value * 100}%` as `${number}%`,
@@ -144,11 +158,9 @@ export default function TimerScreen({ route, navigation }: Props) {
     if (!isRunning) return;
 
     const id = setInterval(() => {
-      // Elapsed
       elapsedRef.current += 1;
       setElapsed(elapsedRef.current);
 
-      // Countdown
       const next = secsRef.current - 1;
       if (next > 0) {
         secsRef.current = next;
@@ -163,75 +175,58 @@ export default function TimerScreen({ route, navigation }: Props) {
     return () => clearInterval(id);
   }, [isRunning]);
 
-  // ── Phase transitions ────────────────────────────────────────────────────
-  function setState(
-    newPhase: WorkoutPhase,
-    newSecs: number,
-    newRound = roundRef.current,
-  ) {
-    phaseRef.current = newPhase;
-    secsRef.current  = newSecs;
-    roundRef.current = newRound;
-    setPhase(newPhase);
-    setSecsLeft(newSecs);
-    setCurrentRound(newRound);
-  }
-
+  // ── Phase transitions ─────────────────────────────────────────────────────
   function advancePhase() {
-    const p = phaseRef.current;
-    const r = roundRef.current;
+    const nextIndex = currentStepIndexRef.current + 1;
+    if (nextIndex >= steps.length) {
+      secsRef.current = 0;
+      setSecsLeft(0);
+      setIsDone(true);
+      setIsRunning(false);
+      audioManager.playFinish();
+    } else {
+      const nextStep = steps[nextIndex];
+      currentStepIndexRef.current = nextIndex;
+      secsRef.current = nextStep.durationSecs;
+      setCurrentStepIndex(nextIndex);
+      setSecsLeft(nextStep.durationSecs);
 
-    switch (p) {
-      case 'warmup':
-        setState('work', roundSecs, 1);
-        audioManager.playStart();
-        break;
-
-      case 'work': {
-        const isLast = r >= totalRounds;
-        if (!isLast) {
-          if (restSecs > 0) {
-            setState('rest', restSecs);
-            audioManager.playRest();
-          } else {
-            setState('work', roundSecs, r + 1);
-            audioManager.playStart();
-          }
-        } else {
-          if (coolDownSecs > 0) {
-            setState('cooldown', coolDownSecs);
-          } else {
-            finish();
-          }
-        }
-        break;
-      }
-
-      case 'rest':
-        setState('work', roundSecs, r + 1);
-        audioManager.playStart();
-        break;
-
-      case 'cooldown':
-        finish();
-        break;
+      if (nextStep.phase === 'round') audioManager.playStart();
+      else if (nextStep.phase === 'rest') audioManager.playRest();
     }
   }
 
-  function finish() {
-    phaseRef.current = 'done';
-    secsRef.current  = 0;
-    setPhase('done');
-    setSecsLeft(0);
-    setIsRunning(false);
-    audioManager.playFinish();
-  }
+  // ── Navigation ────────────────────────────────────────────────────────────
+  const goToStep = (index: number) => {
+    if (index < 0 || index >= steps.length) return;
+    const step = steps[index];
+    currentStepIndexRef.current = index;
+    secsRef.current = step.durationSecs;
+    setCurrentStepIndex(index);
+    setSecsLeft(step.durationSecs);
+    setIsDone(false);
+  };
+
+  const goNext = () => goToStep(currentStepIndex + 1);
+
+  const goPrev = () => {
+    if (isRunning && steps[currentStepIndex].phase === 'round') {
+      Alert.alert(
+        'Go back?',
+        'This will restart the previous phase.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Go back', onPress: () => goToStep(currentStepIndex - 1) },
+        ],
+      );
+    } else {
+      goToStep(currentStepIndex - 1);
+    }
+  };
 
   // ── Controls ──────────────────────────────────────────────────────────────
   function handleStart() {
-    if (phase === 'ready') {
-      phaseRef.current = 'work';
-      setPhase('work');
+    if (elapsed === 0 && !isRunning && steps[currentStepIndex].phase === 'round') {
       audioManager.playStart();
     }
     setIsRunning(true);
@@ -241,19 +236,17 @@ export default function TimerScreen({ route, navigation }: Props) {
 
   function handleReset() {
     setIsRunning(false);
-    phaseRef.current  = initialPhase;
-    secsRef.current   = initialSecs;
-    roundRef.current  = 1;
-    elapsedRef.current = 0;
-    setPhase(initialPhase);
-    setSecsLeft(initialSecs);
-    setCurrentRound(1);
+    setCurrentStepIndex(0);
+    setSecsLeft(steps[0].durationSecs);
     setElapsed(0);
+    setIsDone(false);
+    currentStepIndexRef.current = 0;
+    secsRef.current = steps[0].durationSecs;
+    elapsedRef.current = 0;
   }
 
   function handleBack() {
-    const isActive = phase !== 'ready' && phase !== 'done';
-    if (isActive) {
+    if (!isAtStart && !isDone) {
       Alert.alert('Stop workout?', undefined, [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Stop', style: 'destructive', onPress: () => navigation.goBack() },
@@ -262,28 +255,6 @@ export default function TimerScreen({ route, navigation }: Props) {
       navigation.goBack();
     }
   }
-
-  // ── Derived values ────────────────────────────────────────────────────────
-  const color    = PHASE_COLOR[phase];
-  const gradient = GRADIENT[phase];
-  const isActive = phase !== 'ready' && phase !== 'done';
-  const showBack  = phase === 'ready' || phase === 'done';
-  const showReset = isActive || phase === 'done';
-
-  const remainingState: CalcRemainingState = {
-    phase,
-    secsLeft,
-    totalRounds,
-    currentRound,
-    roundSecs,
-    restSecs,
-    coolDownSecs,
-  };
-  const remaining = calcRemaining(remainingState);
-
-  const isFirstStart =
-    phase === 'ready' ||
-    (phase === initialPhase && secsLeft === initialSecs && !isRunning);
 
   return (
     <LinearGradient
@@ -301,12 +272,6 @@ export default function TimerScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      {/* ── Phase header ─────────────────────────────────────────────────── */}
-      <View style={styles.phaseHeader}>
-        <Text style={styles.phaseName}>{phaseName(phase, currentRound)}</Text>
-        <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
-      </View>
-
       {/* ── Main timer ───────────────────────────────────────────────────── */}
       <View style={styles.displayArea}>
         <Text style={[styles.timerText, { color }]}>{fmtMSS(secsLeft)}</Text>
@@ -316,6 +281,16 @@ export default function TimerScreen({ route, navigation }: Props) {
       <View style={styles.progressBg}>
         <Animated.View style={[styles.progressFill, progressStyle, { backgroundColor: color }]} />
       </View>
+
+      {/* ── Phase row: arrows + label ─────────────────────────────────────── */}
+      <View style={styles.phaseRow}>
+        <ArrowButton direction="left" disabled={prevDisabled} onPress={goPrev} />
+        <Text style={styles.phaseName}>{phaseLabel}</Text>
+        <ArrowButton direction="right" disabled={nextDisabled} onPress={goNext} />
+      </View>
+
+      {/* ── Workout name ─────────────────────────────────────────────────── */}
+      <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
 
       {/* ── Stats row ────────────────────────────────────────────────────── */}
       <View style={styles.statsRow}>
@@ -344,9 +319,9 @@ export default function TimerScreen({ route, navigation }: Props) {
           <Pressable style={styles.primaryBtn} onPress={handlePause}>
             <Text style={styles.primaryBtnText}>PAUSE</Text>
           </Pressable>
-        ) : phase !== 'done' ? (
+        ) : !isDone ? (
           <Pressable style={styles.primaryBtn} onPress={handleStart}>
-            <Text style={styles.primaryBtnText}>{isFirstStart ? 'START' : 'RESUME'}</Text>
+            <Text style={styles.primaryBtnText}>{isAtStart ? 'START' : 'RESUME'}</Text>
           </Pressable>
         ) : null}
       </View>
@@ -374,22 +349,6 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // Phase header
-  phaseHeader: {
-    marginBottom: 4,
-  },
-  phaseName: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: '500',
-  },
-  workoutSubtitle: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 13,
-    fontWeight: '400',
-    marginTop: 2,
-  },
-
   // Main timer
   displayArea: {
     flex: 1,
@@ -410,11 +369,46 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
     borderRadius: 2,
     overflow: 'hidden',
-    marginBottom: 28,
+    marginBottom: 20,
   },
   progressFill: {
     height: 3,
     borderRadius: 2,
+  },
+
+  // Phase row
+  phaseRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginBottom: 4,
+  },
+  arrowBtn: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowText: {
+    color: '#ffffff',
+    fontSize: 20,
+  },
+  phaseName: {
+    color: '#ffffff',
+    fontSize: 18,
+    fontWeight: '500',
+    textAlign: 'center',
+    minWidth: 100,
+  },
+
+  // Workout subtitle
+  workoutSubtitle: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
+    marginBottom: 28,
   },
 
   // Stats row

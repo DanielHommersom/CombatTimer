@@ -5,7 +5,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -24,21 +24,43 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
-import TimeInput from '../components/TimeInput';
+import TimePill from '../components/TimePill';
+import TimePickerModal from '../components/TimePickerModal';
+import WorkoutBreakdownBar from '../components/WorkoutBreakdownBar';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
 
 type WorkoutNav = NativeStackNavigationProp<RootStackParamList>;
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const COLOR_OPTIONS = ['#34c759', '#ff453a', '#0a84ff', '#ffd60a', '#bf5af2', '#ff9f0a'];
+
+const SNAP_POINTS = ['90%'];
+
+const PHASE_COLORS = {
+  warmUp:    '#ffd60a',
+  roundTime: '#ff453a',
+  rest:      '#34c759',
+  coolDown:  '#0a84ff',
+};
+
+type PickerField = 'warmUp' | 'roundTime' | 'rest' | 'coolDown' | null;
+
+const FIELD_LABELS: Record<Exclude<PickerField, null>, string> = {
+  warmUp:    'Warm-up',
+  roundTime: 'Round time',
+  rest:      'Rest',
+  coolDown:  'Cooling down',
+};
+
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
-/** "3:00" → 180 (seconds). Returns 0 for empty / unparseable strings. */
 function parseTime(str: string): number {
   if (!str || !str.includes(':')) return 0;
   const [m, s] = str.split(':').map((n) => parseInt(n) || 0);
   return m * 60 + s;
 }
 
-/** 180 → "3 min" | 3690 → "1 hr 1 min 30 sec" */
 function formatDuration(seconds: number): string {
   if (seconds <= 0) return '0 sec';
   const h = Math.floor(seconds / 3600);
@@ -47,17 +69,8 @@ function formatDuration(seconds: number): string {
   const parts: string[] = [];
   if (h > 0) parts.push(`${h} hr`);
   if (m > 0) parts.push(`${m} min`);
-  if (s > 0 && h === 0) parts.push(`${s} sec`); // drop seconds once we have hours
+  if (s > 0 && h === 0) parts.push(`${s} sec`);
   return parts.join(' ');
-}
-
-/** Returns true when a string is a correctly formatted, saveable time value. */
-function isValidTimeStr(s: string): boolean {
-  if (!s || !s.includes(':')) return false;
-  const [m, sec] = s.split(':');
-  const mins = parseInt(m);
-  const secs = parseInt(sec);
-  return !isNaN(mins) && !isNaN(secs) && secs <= 59 && mins >= 0;
 }
 
 function calcTotal(warmUp: string, rounds: number, roundTime: string, rest: string, coolDown: string): number {
@@ -70,33 +83,29 @@ function calcTotal(warmUp: string, rounds: number, roundTime: string, rest: stri
   );
 }
 
-// ─── Constants ───────────────────────────────────────────────────────────────
-
-const COLOR_OPTIONS = ['#34c759', '#ff453a', '#0a84ff', '#ffd60a', '#bf5af2', '#ff9f0a'];
-
-const SNAP_POINTS = ['90%'];
+// ─── Form helpers ──────────────────────────────────────────────────────────────
 
 const EMPTY_FORM = {
-  name: '',
-  warmUp: '',
-  rounds: '3',
+  name:      '',
+  warmUp:    '0:00',
+  rounds:    '3',
   roundTime: '3:00',
-  rest: '1:00',
-  coolDown: '',
-  color: COLOR_OPTIONS[0],
+  rest:      '1:00',
+  coolDown:  '0:00',
+  color:     COLOR_OPTIONS[0],
 };
 
 type FormState = typeof EMPTY_FORM;
 
 function workoutToForm(w: Workout): FormState {
   return {
-    name: w.name,
-    warmUp: w.warmUp === '0:00' ? '' : w.warmUp,
-    rounds: String(w.rounds),
+    name:      w.name,
+    warmUp:    w.warmUp,
+    rounds:    String(w.rounds),
     roundTime: w.roundTime,
-    rest: w.rest,
-    coolDown: w.coolDown === '0:00' ? '' : w.coolDown,
-    color: w.color,
+    rest:      w.rest,
+    coolDown:  w.coolDown,
+    color:     w.color,
   };
 }
 
@@ -108,8 +117,9 @@ export default function WorkoutScreen() {
   const { workouts, loading, addWorkout, updateWorkout, deleteWorkout } = useWorkouts();
 
   const sheetRef = useRef<BottomSheetModal>(null);
-  const [editing, setEditing] = useState<Workout | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [editing, setEditing]         = useState<Workout | null>(null);
+  const [form, setForm]               = useState<FormState>(EMPTY_FORM);
+  const [activePicker, onPickerChange] = useState<PickerField>(null);
 
   const snapPoints = useMemo(() => SNAP_POINTS, []);
 
@@ -128,13 +138,13 @@ export default function WorkoutScreen() {
   async function handleSave() {
     if (!form.name.trim()) return;
     const data = {
-      name: form.name.trim(),
-      warmUp: form.warmUp || '0:00',
-      rounds: Math.max(1, parseInt(form.rounds) || 1),
+      name:      form.name.trim(),
+      warmUp:    form.warmUp || '0:00',
+      rounds:    Math.max(1, parseInt(form.rounds) || 1),
       roundTime: form.roundTime || '3:00',
-      rest: form.rest || '1:00',
-      coolDown: form.coolDown || '0:00',
-      color: form.color,
+      rest:      form.rest || '1:00',
+      coolDown:  form.coolDown || '0:00',
+      color:     form.color,
     };
     if (editing) {
       await updateWorkout({ ...editing, ...data });
@@ -202,7 +212,7 @@ export default function WorkoutScreen() {
         backgroundStyle={styles.sheetBg}
         handleIndicatorStyle={styles.sheetHandle}
         keyboardBehavior="extend"
-        keyboardBlursBehavior="restore"
+        keyboardBlurBehavior="restore"
       >
         <WorkoutForm
           form={form}
@@ -211,8 +221,23 @@ export default function WorkoutScreen() {
           onSave={handleSave}
           onCancel={() => sheetRef.current?.dismiss()}
           onDelete={handleDelete}
+          activePicker={activePicker}
+          onPickerChange={onPickerChange}
         />
       </BottomSheetModal>
+
+      {/* TimePickerModal buiten BottomSheetModal om touch-conflicten te vermijden */}
+      <TimePickerModal
+        visible={activePicker !== null}
+        value={activePicker !== null ? (form[activePicker] || '0:00') : '0:00'}
+        color={activePicker !== null ? PHASE_COLORS[activePicker] : '#fff'}
+        label={activePicker !== null ? FIELD_LABELS[activePicker] : ''}
+        onConfirm={(val) => {
+          if (activePicker !== null) setForm((p) => ({ ...p, [activePicker]: val }));
+          onPickerChange(null);
+        }}
+        onClose={() => onPickerChange(null)}
+      />
     </View>
   );
 }
@@ -228,9 +253,8 @@ function WorkoutCard({
   onEdit: () => void;
   onPlay: () => void;
 }) {
-  const totalSec = calcTotal(workout.warmUp, workout.rounds, workout.roundTime, workout.rest, workout.coolDown);
-
-  const scale    = useSharedValue(1);
+  const totalSec  = calcTotal(workout.warmUp, workout.rounds, workout.roundTime, workout.rest, workout.coolDown);
+  const scale     = useSharedValue(1);
   const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
   function handlePlay() {
@@ -243,12 +267,24 @@ function WorkoutCard({
       <View style={[styles.cardStrip, { backgroundColor: workout.color }]} />
       <View style={styles.cardBody}>
         <Text style={styles.cardName}>{workout.name}</Text>
-        <View style={styles.cardMeta}>
-          <MetaPill icon="repeat-outline"       value={`${workout.rounds} rds`} />
-          <MetaPill icon="timer-outline"        value={workout.roundTime} />
-          <MetaPill icon="pause-circle-outline" value={workout.rest} />
+
+        {/* Phase pills */}
+        <View style={styles.cardPills}>
+          {parseTime(workout.warmUp) > 0 && (
+            <TimePill value={workout.warmUp} color={PHASE_COLORS.warmUp} size="sm" onPress={() => {}} />
+          )}
+          {parseTime(workout.roundTime) > 0 && (
+            <TimePill value={workout.roundTime} color={PHASE_COLORS.roundTime} size="sm" onPress={() => {}} />
+          )}
+          {parseTime(workout.rest) > 0 && (
+            <TimePill value={workout.rest} color={PHASE_COLORS.rest} size="sm" onPress={() => {}} />
+          )}
+          {parseTime(workout.coolDown) > 0 && (
+            <TimePill value={workout.coolDown} color={PHASE_COLORS.coolDown} size="sm" onPress={() => {}} />
+          )}
         </View>
-        <Text style={styles.cardTotal}>~{formatDuration(totalSec)} total</Text>
+
+        <Text style={styles.cardTotal}>~{formatDuration(totalSec)} · {workout.rounds} rounds</Text>
       </View>
       <View style={styles.cardActions}>
         <Pressable style={styles.iconBtn} onPress={onEdit} hitSlop={8}>
@@ -260,21 +296,6 @@ function WorkoutCard({
           </Pressable>
         </Animated.View>
       </View>
-    </View>
-  );
-}
-
-function MetaPill({
-  icon,
-  value,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  value: string;
-}) {
-  return (
-    <View style={styles.metaPill}>
-      <Ionicons name={icon} size={12} color="rgba(255,255,255,0.4)" />
-      <Text style={styles.metaText}>{value}</Text>
     </View>
   );
 }
@@ -299,141 +320,127 @@ interface FormProps {
   onSave: () => void;
   onCancel: () => void;
   onDelete: () => void;
+  activePicker: PickerField;
+  onPickerChange: (field: PickerField) => void;
 }
 
-function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete }: FormProps) {
-  const [totalSec, setTotalSec] = useState(0);
-
-  useEffect(() => {
-    setTotalSec(
-      calcTotal(
-        form.warmUp,
-        parseInt(form.rounds) || 1,
-        form.roundTime,
-        form.rest,
-        form.coolDown,
-      ),
-    );
-  }, [form.warmUp, form.rounds, form.roundTime, form.rest, form.coolDown]);
-
-  function set(key: keyof FormState) {
-    return (val: string) => onChange((prev) => ({ ...prev, [key]: val }));
-  }
-
-  const canSave =
-    form.name.trim().length > 0 &&
-    isValidTimeStr(form.roundTime) &&
-    isValidTimeStr(form.rest);
+function WorkoutForm({ form, onChange, isEditing, onSave, onCancel, onDelete, onPickerChange }: FormProps) {
+  const canSave = form.name.trim().length > 0 && parseTime(form.roundTime) > 0;
 
   return (
-    <BottomSheetScrollView
-      contentContainerStyle={styles.formScroll}
-      keyboardShouldPersistTaps="handled"
-    >
-      {/* Title row */}
-      <View style={styles.formHeader}>
-        <Text style={styles.formTitle}>{isEditing ? 'Edit workout' : 'New workout'}</Text>
-        <Pressable onPress={onCancel} hitSlop={8}>
-          <Ionicons name="close" size={22} color="rgba(255,255,255,0.5)" />
-        </Pressable>
-      </View>
-
-      {/* Name */}
-      <Text style={styles.formLabel}>NAME</Text>
-      <BottomSheetTextInput
-        style={styles.input}
-        value={form.name}
-        onChangeText={set('name')}
-        placeholder="e.g. Boxing rounds"
-        placeholderTextColor="rgba(255,255,255,0.25)"
-      />
-
-      {/* Warm-up */}
-      <TimeInput
-        label="WARM-UP"
-        value={form.warmUp}
-        onChange={set('warmUp')}
-        placeholder="0:00"
-      />
-
-      {/* Rounds + Round time + Rest */}
-      <View style={styles.formRow}>
-        <View style={styles.formCol}>
-          <Text style={styles.formLabel}>ROUNDS</Text>
-          <BottomSheetTextInput
-            style={styles.input}
-            value={form.rounds}
-            onChangeText={set('rounds')}
-            keyboardType="number-pad"
-            maxLength={2}
-          />
-        </View>
-        <View style={styles.formCol}>
-          <TimeInput
-            label="ROUND TIME"
-            value={form.roundTime}
-            onChange={set('roundTime')}
-            placeholder="3:00"
-            required
-          />
-        </View>
-        <View style={styles.formCol}>
-          <TimeInput
-            label="REST"
-            value={form.rest}
-            onChange={set('rest')}
-            placeholder="1:00"
-            required
-          />
-        </View>
-      </View>
-
-      {/* Cooling down */}
-      <TimeInput
-        label="COOLING DOWN"
-        value={form.coolDown}
-        onChange={set('coolDown')}
-        placeholder="0:00"
-      />
-
-      {/* Color picker */}
-      <Text style={styles.formLabel}>COLOR</Text>
-      <View style={styles.colorRow}>
-        {COLOR_OPTIONS.map((c) => (
-          <Pressable
-            key={c}
-            style={[
-              styles.colorDot,
-              { backgroundColor: c },
-              form.color === c && styles.colorDotActive,
-            ]}
-            onPress={() => onChange((prev) => ({ ...prev, color: c }))}
-          />
-        ))}
-      </View>
-
-      {/* Total time */}
-      <View style={styles.totalRow}>
-        <Text style={styles.totalLabel}>Total workout time</Text>
-        <Text style={styles.totalValue}>{formatDuration(totalSec)}</Text>
-      </View>
-
-      {/* Save */}
-      <Pressable
-        style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
-        onPress={onSave}
-        disabled={!canSave}
+    <>
+      <BottomSheetScrollView
+        contentContainerStyle={styles.formScroll}
+        keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.saveBtnText}>{isEditing ? 'Save changes' : 'Save workout'}</Text>
-      </Pressable>
+        {/* Title row */}
+        <View style={styles.formHeader}>
+          <Text style={styles.formTitle}>{isEditing ? 'Edit workout' : 'New workout'}</Text>
+          <Pressable onPress={onCancel} hitSlop={8}>
+            <Ionicons name="close" size={22} color="rgba(255,255,255,0.5)" />
+          </Pressable>
+        </View>
 
-      {/* Delete (edit only) */}
-      {isEditing && (
-        <Pressable style={styles.deleteBtn} onPress={onDelete}>
-          <Text style={styles.deleteBtnText}>Delete workout</Text>
+        {/* Name */}
+        <Text style={styles.formLabel}>NAME</Text>
+        <BottomSheetTextInput
+          style={styles.input}
+          value={form.name}
+          onChangeText={(v) => onChange((p) => ({ ...p, name: v }))}
+          placeholder="e.g. Boxing rounds"
+          placeholderTextColor="rgba(255,255,255,0.25)"
+        />
+
+        {/* Rounds */}
+        <Text style={styles.formLabel}>ROUNDS</Text>
+        <BottomSheetTextInput
+          style={[styles.input, styles.inputRounds]}
+          value={form.rounds}
+          onChangeText={(v) => onChange((p) => ({ ...p, rounds: v }))}
+          keyboardType="number-pad"
+          maxLength={2}
+        />
+
+        {/* Time fields */}
+        <View style={styles.timeSection}>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeRowLabel}>Warm-up</Text>
+            <TimePill
+              value={form.warmUp}
+              color={PHASE_COLORS.warmUp}
+              onPress={() => onPickerChange('warmUp')}
+            />
+          </View>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeRowLabel}>Round time</Text>
+            <TimePill
+              value={form.roundTime}
+              color={PHASE_COLORS.roundTime}
+              onPress={() => onPickerChange('roundTime')}
+            />
+          </View>
+          <View style={styles.timeRow}>
+            <Text style={styles.timeRowLabel}>Rest</Text>
+            <TimePill
+              value={form.rest}
+              color={PHASE_COLORS.rest}
+              onPress={() => onPickerChange('rest')}
+            />
+          </View>
+          <View style={[styles.timeRow, styles.timeRowLast]}>
+            <Text style={styles.timeRowLabel}>Cooling down</Text>
+            <TimePill
+              value={form.coolDown}
+              color={PHASE_COLORS.coolDown}
+              onPress={() => onPickerChange('coolDown')}
+            />
+          </View>
+        </View>
+
+        {/* Color picker */}
+        <Text style={styles.formLabel}>COLOR</Text>
+        <View style={styles.colorRow}>
+          {COLOR_OPTIONS.map((c) => (
+            <Pressable
+              key={c}
+              style={[
+                styles.colorDot,
+                { backgroundColor: c },
+                form.color === c && styles.colorDotActive,
+              ]}
+              onPress={() => onChange((p) => ({ ...p, color: c }))}
+            />
+          ))}
+        </View>
+
+        {/* Breakdown bar */}
+        <View style={styles.divider} />
+        <WorkoutBreakdownBar
+          warmUp={form.warmUp}
+          rounds={parseInt(form.rounds) || 1}
+          roundTime={form.roundTime}
+          rest={form.rest}
+          coolDown={form.coolDown}
+        />
+        <View style={styles.divider} />
+
+        {/* Save */}
+        <Pressable
+          style={[styles.saveBtn, !canSave && styles.saveBtnDisabled]}
+          onPress={onSave}
+          disabled={!canSave}
+        >
+          <Text style={styles.saveBtnText}>{isEditing ? 'Save changes' : 'Save workout'}</Text>
         </Pressable>
-      )}
-    </BottomSheetScrollView>
+
+        {/* Delete (edit only) */}
+        {isEditing && (
+          <Pressable style={styles.deleteBtn} onPress={onDelete}>
+            <Text style={styles.deleteBtnText}>Delete workout</Text>
+          </Pressable>
+        )}
+      </BottomSheetScrollView>
+    </>
   );
 }
 
@@ -522,27 +529,19 @@ const styles = StyleSheet.create({
   },
   cardBody: {
     flex: 1,
-    paddingVertical: 14,
+    paddingVertical: 12,
     paddingLeft: 14,
-    gap: 4,
+    gap: 6,
   },
   cardName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  cardMeta: {
+  cardPills: {
     flexDirection: 'row',
-    gap: 10,
-  },
-  metaPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  metaText: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 12,
+    flexWrap: 'wrap',
+    gap: 5,
   },
   cardTotal: {
     color: 'rgba(255,255,255,0.3)',
@@ -615,13 +614,38 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     marginBottom: 20,
   },
-  formRow: {
+  inputRounds: {
+    width: 80,
+  },
+
+  // Time section
+  timeSection: {
+    borderRadius: 12,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.10)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    marginBottom: 24,
+    overflow: 'hidden',
+  },
+  timeRow: {
     flexDirection: 'row',
-    gap: 10,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderBottomWidth: 0.5,
+    borderBottomColor: 'rgba(255,255,255,0.07)',
   },
-  formCol: {
-    flex: 1,
+  timeRowLast: {
+    borderBottomWidth: 0,
   },
+  timeRowLabel: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '400',
+  },
+
+  // Color picker
   colorRow: {
     flexDirection: 'row',
     gap: 12,
@@ -637,25 +661,10 @@ const styles = StyleSheet.create({
     borderColor: '#fff',
   },
 
-  // Total time
-  totalRow: {
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255,255,255,0.08)',
-    paddingTop: 16,
-    marginBottom: 20,
-    gap: 4,
-  },
-  totalLabel: {
-    color: 'rgba(255,255,255,0.35)',
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  totalValue: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
+  divider: {
+    height: 0.5,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    marginVertical: 16,
   },
 
   saveBtn: {

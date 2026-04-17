@@ -1,3 +1,5 @@
+import type { Workout } from '../types/workout';
+
 // ─── Legacy types (used by Tab Timer / useTimerStore) ────────────────────────
 
 export type TimerPhase = 'idle' | 'work' | 'rest' | 'finished';
@@ -101,6 +103,50 @@ export function calcRemaining(s: CalcRemainingState): number {
   // 'cooldown' and 'done': secsLeft is already the full answer
 
   return Math.max(0, total);
+}
+
+// ─── Step-based phase navigation ─────────────────────────────────────────────
+
+export type Phase = 'warmup' | 'round' | 'rest' | 'cooldown' | 'done';
+
+export interface PhaseStep {
+  phase: Phase;
+  round?: number;
+  durationSecs: number;
+  label: string;
+}
+
+export function buildPhaseSteps(workout: Workout): PhaseStep[] {
+  const steps: PhaseStep[] = [];
+
+  if (parseTime(workout.warmUp) > 0) {
+    steps.push({ phase: 'warmup', durationSecs: parseTime(workout.warmUp), label: 'Warm-up' });
+  }
+
+  for (let i = 1; i <= workout.rounds; i++) {
+    steps.push({ phase: 'round', round: i, durationSecs: parseTime(workout.roundTime), label: `Round ${i}` });
+    if (i < workout.rounds) {
+      steps.push({ phase: 'rest', round: i, durationSecs: parseTime(workout.rest), label: 'Rest' });
+    }
+  }
+
+  if (parseTime(workout.coolDown) > 0) {
+    steps.push({ phase: 'cooldown', durationSecs: parseTime(workout.coolDown), label: 'Cooling down' });
+  }
+
+  return steps;
+}
+
+export function calcRemainingFromSteps(
+  steps: PhaseStep[],
+  currentStepIndex: number,
+  secsLeft: number,
+): number {
+  let total = secsLeft;
+  for (let i = currentStepIndex + 1; i < steps.length; i++) {
+    total += steps[i].durationSecs;
+  }
+  return total;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
