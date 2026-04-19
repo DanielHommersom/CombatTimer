@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "CombatTimer",
-    "slug": "CombatTimer",
+    "slug": "combat-timer",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,7 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.digitaldiamonds.combattimer",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -25,6 +29,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "06e5cdfc-df38-4002-a591-981ca2c997d6"
+      }
+    },
+    "owner": "digital-diamonds"
   }
 }

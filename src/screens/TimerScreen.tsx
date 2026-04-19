@@ -1,48 +1,47 @@
-import { useKeepAwake } from 'expo-keep-awake';
-import { LinearGradient } from 'expo-linear-gradient';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { audioManager } from '../logic/audioManager';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Phase,
-  PhaseStep,
-  buildPhaseSteps,
-  calcRemainingFromSteps,
-} from '../logic/timerEngine';
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import TimePickerModal from '../components/TimePickerModal';
+import { PRESET_CATEGORIES, Preset } from '../data/presets';
+import { Phase } from '../logic/timerEngine';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
+import { useTimer } from '../store/TimerContext';
+import { Workout } from '../types/workout';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-type Props = NativeStackScreenProps<RootStackParamList, 'ActiveTimer'>;
+type Nav = NativeStackNavigationProp<RootStackParamList>;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const WARNING_SECS = 10;
+const ROUND_ITEM_W = 44;
+const ROUNDS       = Array.from({ length: 20 }, (_, i) => i + 1);
 
-const PHASE_COLOR: Record<Phase, string> = {
-  warmup:   '#ffd60a',
-  round:    '#34c759',
-  rest:     '#ff453a',
-  cooldown: '#0a84ff',
-  done:     'rgba(255,255,255,0.4)',
-};
+const QT_DEFAULTS = { rounds: 6, roundTime: '3:00', rest: '1:00' };
 
-const GRADIENT: Record<Phase, [string, string]> = {
-  warmup:   ['#111111', '#1a1400'],
-  round:    ['#111111', '#0d1a0d'],
-  rest:     ['#111111', '#0d0014'],
-  cooldown: ['#111111', '#00101a'],
-  done:     ['#111111', '#111111'],
-};
+const QUICK_PRESET_IDS = [
+  'boxing-beginner',
+  'boxing-amateur',
+  'boxing-pro',
+  'heavy-bag',
+  'tabata-combat',
+  'endurance',
+];
 
-// ─── Display helpers ──────────────────────────────────────────────────────────
+const QUICK_PRESETS: Preset[] = PRESET_CATEGORIES
+  .flatMap((c) => c.presets)
+  .filter((p) => QUICK_PRESET_IDS.includes(p.id))
+  .sort((a, b) => QUICK_PRESET_IDS.indexOf(a.id) - QUICK_PRESET_IDS.indexOf(b.id));
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function fmtMSS(secs: number): string {
   const m = Math.floor(secs / 60);
@@ -50,431 +49,480 @@ function fmtMSS(secs: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
-function fmtHMSS(secs: number): string {
-  if (secs < 3600) return fmtMSS(secs);
-  const h = Math.floor(secs / 3600);
-  const m = Math.floor((secs % 3600) / 60);
-  const s = secs % 60;
-  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+function phaseLabel(phase: Phase | null, round: number, total: number): string {
+  if (phase === 'round')    return `Round ${round} of ${total}`;
+  if (phase === 'rest')     return 'Rest';
+  if (phase === 'warmup')   return 'Warm-up';
+  if (phase === 'cooldown') return 'Cool-down';
+  return '';
 }
 
-// ─── ArrowButton ──────────────────────────────────────────────────────────────
+export const startWorkout = async (
+  workout: Workout,
+  navigation: Nav,
+): Promise<void> => {
+  await AsyncStorage.setItem('last_workout', JSON.stringify(workout));
+  navigation.navigate('ActiveTimer', { workout });
+};
 
-interface ArrowButtonProps {
-  direction: 'left' | 'right';
-  disabled: boolean;
-  onPress: () => void;
+const presetToWorkout = (p: Preset): Workout => ({
+  id:        `preset-${p.id}-${Date.now()}`,
+  name:      p.name,
+  warmUp:    p.warmUp,
+  rounds:    p.rounds,
+  roundTime: p.roundTime,
+  rest:      p.rest,
+  coolDown:  p.coolDown,
+  color:     p.color,
+  createdAt: Date.now(),
+});
+
+// ─── RoundsPicker ─────────────────────────────────────────────────────────────
+
+interface RoundsPickerProps {
+  value: number;
+  onChange: (v: number) => void;
 }
 
-function ArrowButton({ direction, disabled, onPress }: ArrowButtonProps) {
-  const pressed = useSharedValue(0);
+function RoundsPicker({ value, onChange }: RoundsPickerProps) {
+  const listRef  = useRef<FlatList>(null);
+  const [width, setWidth] = useState(0);
+  const padding  = width > 0 ? Math.max(0, (width - ROUND_ITEM_W) / 2) : 0;
+  const didInit  = useRef(false);
 
-  const animStyle = useAnimatedStyle(() => ({
-    opacity: withTiming(disabled ? 0.2 : pressed.value ? 0.9 : 0.5, { duration: 100 }),
-    transform: [{ scale: withTiming(pressed.value ? 0.92 : 1, { duration: 100 }) }],
-  }));
+  useEffect(() => {
+    if (width > 0 && !didInit.current) {
+      didInit.current = true;
+      listRef.current?.scrollToIndex({ index: value - 1, animated: false });
+    }
+  }, [width]);
+
+  const handleScrollEnd = useCallback((e: any) => {
+    const idx  = Math.round(e.nativeEvent.contentOffset.x / ROUND_ITEM_W);
+    const next = Math.max(1, Math.min(20, idx + 1));
+    onChange(next);
+  }, [onChange]);
+
+  const renderItem = useCallback(({ item }: { item: number }) => (
+    <View style={rpStyles.item}>
+      <Text style={item === value ? rpStyles.selected : rpStyles.unselected}>
+        {item}
+      </Text>
+    </View>
+  ), [value]);
 
   return (
-    <Pressable
-      onPressIn={() => { if (!disabled) pressed.value = 1; }}
-      onPressOut={() => { pressed.value = 0; }}
-      onPress={onPress}
-      disabled={disabled}
-      style={styles.arrowBtn}
-    >
-      <Animated.Text style={[styles.arrowText, animStyle]}>
-        {direction === 'left' ? '‹' : '›'}
-      </Animated.Text>
-    </Pressable>
+    <FlatList
+      ref={listRef}
+      data={ROUNDS}
+      horizontal
+      keyExtractor={String}
+      showsHorizontalScrollIndicator={false}
+      snapToInterval={ROUND_ITEM_W}
+      decelerationRate="fast"
+      getItemLayout={(_, index) => ({
+        length: ROUND_ITEM_W,
+        offset: ROUND_ITEM_W * index,
+        index,
+      })}
+      contentContainerStyle={{ paddingHorizontal: padding }}
+      onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
+      onMomentumScrollEnd={handleScrollEnd}
+      renderItem={renderItem}
+    />
   );
 }
 
+const rpStyles = StyleSheet.create({
+  item: {
+    width: ROUND_ITEM_W,
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 40,
+  },
+  selected: {
+    fontSize: 22,
+    fontWeight: '500',
+    color: '#fff',
+    fontVariant: ['tabular-nums'],
+  },
+  unselected: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.25)',
+    fontVariant: ['tabular-nums'],
+  },
+});
+
 // ─── TimerScreen ──────────────────────────────────────────────────────────────
 
-export default function TimerScreen({ route, navigation }: Props) {
-  useKeepAwake();
+type PickerField = 'roundTime' | 'rest' | null;
 
-  const insets = useSafeAreaInsets();
-  const { workout } = route.params;
+export default function TimerScreen() {
+  const navigation = useNavigation<Nav>();
+  const insets     = useSafeAreaInsets();
 
-  // ── Steps (immutable for the session) ────────────────────────────────────
-  const [steps] = useState<PhaseStep[]>(() => buildPhaseSteps(workout));
+  const {
+    isRunning,
+    activeWorkout,
+    currentPhase,
+    currentRound,
+    totalRounds,
+    secsLeft: storeSecsLeft,
+  } = useTimer();
 
-  // ── Timer state ───────────────────────────────────────────────────────────
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [secsLeft, setSecsLeft]                 = useState(steps[0].durationSecs);
-  const [isRunning, setIsRunning]               = useState(false);
-  const [elapsed, setElapsed]                   = useState(0);
-  const [isDone, setIsDone]                     = useState(false);
+  // ── Last session ────────────────────────────────────────────────────────────
+  const [lastWorkout, setLastWorkout] = useState<Workout | null>(null);
 
-  // Refs for interval (avoid stale closures)
-  const currentStepIndexRef = useRef(0);
-  const secsRef             = useRef(steps[0].durationSecs);
-  const elapsedRef          = useRef(0);
+  // ── Quick timer ─────────────────────────────────────────────────────────────
+  const [qtRounds,     setQtRounds]    = useState(QT_DEFAULTS.rounds);
+  const [qtRoundTime,  setQtRoundTime] = useState(QT_DEFAULTS.roundTime);
+  const [qtRest,       setQtRest]      = useState(QT_DEFAULTS.rest);
+  const [activePicker, setActivePicker] = useState<PickerField>(null);
 
-  currentStepIndexRef.current = currentStepIndex;
-  secsRef.current             = secsLeft;
-
-  // ── Derived ───────────────────────────────────────────────────────────────
-  const currentPhase: Phase = isDone ? 'done' : steps[currentStepIndex].phase;
-  const color     = PHASE_COLOR[currentPhase];
-  const gradient  = GRADIENT[currentPhase];
-  const isAtStart = !isRunning && elapsed === 0 && !isDone;
-  const showBack  = isAtStart || isDone;
-  const showReset = !isAtStart;
-  const remaining = isDone ? 0 : calcRemainingFromSteps(steps, currentStepIndex, secsLeft);
-  const phaseLabel   = isDone ? 'Done' : steps[currentStepIndex].label;
-  const prevDisabled = isDone || currentStepIndex === 0;
-  const nextDisabled = isDone || currentStepIndex >= steps.length - 1;
-
-  // ── Progress bar animation ────────────────────────────────────────────────
-  const progressSV  = useSharedValue(1);
-  const prevStepIdx = useRef(0);
-
+  // ── Load from AsyncStorage ──────────────────────────────────────────────────
   useEffect(() => {
-    if (isDone) {
-      progressSV.value = withTiming(0, { duration: 500 });
-      prevStepIdx.current = -1;
-      return;
-    }
-    const dur      = steps[currentStepIndex].durationSecs;
-    const newValue = dur > 0 ? secsLeft / dur : 0;
-    const changed  = prevStepIdx.current !== currentStepIndex;
-    prevStepIdx.current = currentStepIndex;
-
-    if (changed) {
-      progressSV.value = newValue;
-    } else {
-      progressSV.value = withTiming(newValue, { duration: isRunning ? 950 : 0 });
-    }
-  }, [secsLeft, currentStepIndex, isDone]);
-
-  const progressStyle = useAnimatedStyle(() => ({
-    width: `${progressSV.value * 100}%` as `${number}%`,
-  }));
-
-  // ── Interval ──────────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!isRunning) return;
-
-    const id = setInterval(() => {
-      elapsedRef.current += 1;
-      setElapsed(elapsedRef.current);
-
-      const next = secsRef.current - 1;
-      if (next > 0) {
-        secsRef.current = next;
-        setSecsLeft(next);
-        if (next === WARNING_SECS) audioManager.playWarning();
-        return;
+    AsyncStorage.multiGet(['last_workout', 'quick_timer']).then(([[, lw], [, qt]]) => {
+      if (lw) {
+        try { setLastWorkout(JSON.parse(lw)); } catch {}
       }
+      if (qt) {
+        try {
+          const saved = JSON.parse(qt);
+          if (saved.rounds)    setQtRounds(saved.rounds);
+          if (saved.roundTime) setQtRoundTime(saved.roundTime);
+          if (saved.rest)      setQtRest(saved.rest);
+        } catch {}
+      }
+    });
+  }, []);
 
-      advancePhase();
-    }, 1000);
+  // ── Persist quick timer ──────────────────────────────────────────────────────
+  const saveQuickTimer = useCallback(
+    (rounds: number, roundTime: string, rest: string) => {
+      AsyncStorage.setItem('quick_timer', JSON.stringify({ rounds, roundTime, rest }));
+    },
+    [],
+  );
 
-    return () => clearInterval(id);
-  }, [isRunning]);
-
-  // ── Phase transitions ─────────────────────────────────────────────────────
-  function advancePhase() {
-    const nextIndex = currentStepIndexRef.current + 1;
-    if (nextIndex >= steps.length) {
-      secsRef.current = 0;
-      setSecsLeft(0);
-      setIsDone(true);
-      setIsRunning(false);
-      audioManager.playFinish();
-    } else {
-      const nextStep = steps[nextIndex];
-      currentStepIndexRef.current = nextIndex;
-      secsRef.current = nextStep.durationSecs;
-      setCurrentStepIndex(nextIndex);
-      setSecsLeft(nextStep.durationSecs);
-
-      if (nextStep.phase === 'round') audioManager.playStart();
-      else if (nextStep.phase === 'rest') audioManager.playRest();
-    }
-  }
-
-  // ── Navigation ────────────────────────────────────────────────────────────
-  const goToStep = (index: number) => {
-    if (index < 0 || index >= steps.length) return;
-    const step = steps[index];
-    currentStepIndexRef.current = index;
-    secsRef.current = step.durationSecs;
-    setCurrentStepIndex(index);
-    setSecsLeft(step.durationSecs);
-    setIsDone(false);
+  const handleRoundsChange = (v: number) => {
+    setQtRounds(v);
+    saveQuickTimer(v, qtRoundTime, qtRest);
   };
 
-  const goNext = () => goToStep(currentStepIndex + 1);
-
-  const goPrev = () => {
-    if (isRunning && steps[currentStepIndex].phase === 'round') {
-      Alert.alert(
-        'Go back?',
-        'This will restart the previous phase.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Go back', onPress: () => goToStep(currentStepIndex - 1) },
-        ],
-      );
-    } else {
-      goToStep(currentStepIndex - 1);
-    }
+  const handleRoundTimeConfirm = (v: string) => {
+    setQtRoundTime(v);
+    setActivePicker(null);
+    saveQuickTimer(qtRounds, v, qtRest);
   };
 
-  // ── Controls ──────────────────────────────────────────────────────────────
-  function handleStart() {
-    if (elapsed === 0 && !isRunning && steps[currentStepIndex].phase === 'round') {
-      audioManager.playStart();
-    }
-    setIsRunning(true);
-  }
+  const handleRestConfirm = (v: string) => {
+    setQtRest(v);
+    setActivePicker(null);
+    saveQuickTimer(qtRounds, qtRoundTime, v);
+  };
 
-  function handlePause() { setIsRunning(false); }
+  // ── Unified launch ────────────────────────────────────────────────────────
+  const launch = useCallback((workout: Workout) => {
+    startWorkout(workout, navigation);
+  }, [navigation]);
 
-  function handleReset() {
-    setIsRunning(false);
-    setCurrentStepIndex(0);
-    setSecsLeft(steps[0].durationSecs);
-    setElapsed(0);
-    setIsDone(false);
-    currentStepIndexRef.current = 0;
-    secsRef.current = steps[0].durationSecs;
-    elapsedRef.current = 0;
-  }
-
-  function handleBack() {
-    if (!isAtStart && !isDone) {
-      Alert.alert('Stop workout?', undefined, [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Stop', style: 'destructive', onPress: () => navigation.goBack() },
-      ]);
-    } else {
-      navigation.goBack();
-    }
-  }
+  const handleQuickStart = () => {
+    launch({
+      id:        `quick-${Date.now()}`,
+      name:      'Quick Timer',
+      warmUp:    '0:00',
+      rounds:    qtRounds,
+      roundTime: qtRoundTime,
+      rest:      qtRest,
+      coolDown:  '0:00',
+      color:     '#ffffff',
+      createdAt: Date.now(),
+    });
+  };
 
   return (
-    <LinearGradient
-      colors={gradient}
-      style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom + 32 }]}
-    >
-      {/* ── Top bar ──────────────────────────────────────────────────────── */}
-      <View style={styles.topBar}>
-        {showBack ? (
-          <Pressable onPress={handleBack} hitSlop={12}>
-            <Text style={styles.backText}>← Back</Text>
-          </Pressable>
-        ) : (
-          <View />
-        )}
-      </View>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
 
-      {/* ── Main timer ───────────────────────────────────────────────────── */}
-      <View style={styles.displayArea}>
-        <Text style={[styles.timerText, { color }]}>{fmtMSS(secsLeft)}</Text>
-      </View>
+      {/* ── Active session banner ───────────────────────────────────────────── */}
+      {isRunning && activeWorkout && (
+        <Pressable
+          style={styles.banner}
+          onPress={() => navigation.navigate('ActiveTimer', { workout: activeWorkout })}
+        >
+          <Text style={styles.bannerBullet}>●</Text>
+          <Text style={styles.bannerLabel}>
+            {phaseLabel(currentPhase, currentRound, totalRounds)}
+            {'  —  '}
+            <Text style={styles.bannerTime}>{fmtMSS(storeSecsLeft)}</Text>
+          </Text>
+          <Text style={styles.bannerArrow}>›</Text>
+        </Pressable>
+      )}
 
-      {/* ── Progress bar ─────────────────────────────────────────────────── */}
-      <View style={styles.progressBg}>
-        <Animated.View style={[styles.progressFill, progressStyle, { backgroundColor: color }]} />
-      </View>
-
-      {/* ── Phase row: arrows + label ─────────────────────────────────────── */}
-      <View style={styles.phaseRow}>
-        <ArrowButton direction="left" disabled={prevDisabled} onPress={goPrev} />
-        <Text style={styles.phaseName}>{phaseLabel}</Text>
-        <ArrowButton direction="right" disabled={nextDisabled} onPress={goNext} />
-      </View>
-
-      {/* ── Workout name ─────────────────────────────────────────────────── */}
-      <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
-
-      {/* ── Stats row ────────────────────────────────────────────────────── */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCol}>
-          <Text style={styles.statLabel}>ELAPSED</Text>
-          <Text style={styles.statValue}>{fmtMSS(elapsed)}</Text>
-        </View>
-
-        <View style={styles.statDivider} />
-
-        <View style={[styles.statCol, styles.statColRight]}>
-          <Text style={styles.statLabel}>REMAINING</Text>
-          <Text style={styles.statValue}>{fmtHMSS(remaining)}</Text>
-        </View>
-      </View>
-
-      {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <View style={styles.controls}>
-        {showReset && (
-          <Pressable style={styles.secondaryBtn} onPress={handleReset}>
-            <Text style={styles.secondaryBtnText}>RESET</Text>
-          </Pressable>
+      {/* ── Scrollable content ──────────────────────────────────────────────── */}
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.content}
+      >
+        {/* ── Last session ─────────────────────────────────────────────────── */}
+        {lastWorkout && (
+          <View style={styles.card}>
+            <Text style={styles.cardLabel}>Last session</Text>
+            <Text style={styles.cardName}>{lastWorkout.name}</Text>
+            <Text style={styles.cardMeta}>
+              {lastWorkout.rounds} rounds · {lastWorkout.roundTime} · {lastWorkout.rest} rest
+            </Text>
+            <Pressable
+              style={styles.startBtn}
+              onPress={() => launch(lastWorkout)}
+            >
+              <Text style={styles.startBtnText}>▶  Start again</Text>
+            </Pressable>
+          </View>
         )}
 
-        {isRunning ? (
-          <Pressable style={styles.primaryBtn} onPress={handlePause}>
-            <Text style={styles.primaryBtnText}>PAUSE</Text>
+        {/* ── Quick timer ──────────────────────────────────────────────────── */}
+        <View style={[styles.card, styles.cardGap]}>
+          <Text style={styles.cardLabel}>Quick timer</Text>
+
+          <View style={styles.fieldsRow}>
+            <View style={styles.field}>
+              <RoundsPicker value={qtRounds} onChange={handleRoundsChange} />
+              <Text style={styles.fieldLabel}>Rounds</Text>
+            </View>
+
+            <Pressable style={styles.field} onPress={() => setActivePicker('roundTime')}>
+              <Text style={styles.fieldValue}>{qtRoundTime}</Text>
+              <Text style={styles.fieldLabel}>Round</Text>
+            </Pressable>
+
+            <Pressable style={styles.field} onPress={() => setActivePicker('rest')}>
+              <Text style={styles.fieldValue}>{qtRest}</Text>
+              <Text style={styles.fieldLabel}>Rest</Text>
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.startBtnLarge} onPress={handleQuickStart}>
+            <Text style={styles.startBtnLargeText}>▶  Start</Text>
           </Pressable>
-        ) : !isDone ? (
-          <Pressable style={styles.primaryBtn} onPress={handleStart}>
-            <Text style={styles.primaryBtnText}>{isAtStart ? 'START' : 'RESUME'}</Text>
-          </Pressable>
-        ) : null}
-      </View>
-    </LinearGradient>
+        </View>
+
+        {/* ── Quick start presets ──────────────────────────────────────────── */}
+        <View style={styles.presetsSection}>
+          <Text style={styles.presetsLabel}>Quick start</Text>
+          <FlatList
+            data={QUICK_PRESETS}
+            horizontal
+            keyExtractor={(p) => p.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.presetsContent}
+            renderItem={({ item }) => (
+              <Pressable
+                style={[styles.presetCard, { borderTopColor: item.color }]}
+                onPress={() => launch(presetToWorkout(item))}
+              >
+                <Text style={styles.presetName} numberOfLines={2}>{item.name}</Text>
+                <Text style={styles.presetMeta}>{item.rounds} × {item.roundTime}</Text>
+              </Pressable>
+            )}
+          />
+        </View>
+      </ScrollView>
+
+      {/* ── Time pickers ─────────────────────────────────────────────────────── */}
+      <TimePickerModal
+        visible={activePicker === 'roundTime'}
+        value={qtRoundTime}
+        color="#34c759"
+        label="Round time"
+        onConfirm={handleRoundTimeConfirm}
+        onClose={() => setActivePicker(null)}
+      />
+      <TimePickerModal
+        visible={activePicker === 'rest'}
+        value={qtRest}
+        color="#ff453a"
+        label="Rest"
+        onConfirm={handleRestConfirm}
+        onClose={() => setActivePicker(null)}
+      />
+    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: {
+  container: {
     flex: 1,
-    paddingHorizontal: 24,
+    backgroundColor: '#111',
   },
-
-  // Top bar
-  topBar: {
-    height: 44,
-    justifyContent: 'center',
-  },
-  backText: {
-    color: 'rgba(255,255,255,0.5)',
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-
-  // Main timer
-  displayArea: {
+  scroll: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  timerText: {
-    fontSize: 80,
-    fontWeight: '500',
-    fontVariant: ['tabular-nums'],
-    letterSpacing: -3,
-    includeFontPadding: false,
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
   },
 
-  // Progress bar
-  progressBg: {
-    height: 3,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  progressFill: {
-    height: 3,
-    borderRadius: 2,
-  },
-
-  // Phase row
-  phaseRow: {
+  // ── Active session banner ────────────────────────────────────────────────────
+  banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
+    marginHorizontal: 20,
+    marginTop: 8,
     marginBottom: 4,
+    backgroundColor: 'rgba(52,199,89,0.15)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(52,199,89,0.3)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
   },
-  arrowBtn: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
+  bannerBullet: {
+    fontSize: 10,
+    color: '#34c759',
   },
-  arrowText: {
-    color: '#ffffff',
-    fontSize: 20,
+  bannerLabel: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#fff',
   },
-  phaseName: {
-    color: '#ffffff',
+  bannerTime: {
+    color: '#34c759',
+  },
+  bannerArrow: {
+    fontSize: 18,
+    color: 'rgba(255,255,255,0.4)',
+  },
+
+  // ── Card ────────────────────────────────────────────────────────────────────
+  card: {
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 20,
+    padding: 18,
+    marginTop: 8,
+  },
+  cardGap: {
+    marginTop: 12,
+  },
+  cardLabel: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.07 * 11,
+    color: 'rgba(255,255,255,0.4)',
+    marginBottom: 14,
+  },
+
+  // ── Last session ────────────────────────────────────────────────────────────
+  cardName: {
     fontSize: 18,
     fontWeight: '500',
-    textAlign: 'center',
-    minWidth: 100,
+    color: '#fff',
+    marginTop: 4,
   },
-
-  // Workout subtitle
-  workoutSubtitle: {
-    color: 'rgba(255,255,255,0.4)',
+  cardMeta: {
     fontSize: 13,
-    fontWeight: '400',
-    textAlign: 'center',
-    marginBottom: 28,
+    color: 'rgba(255,255,255,0.4)',
+    marginTop: 2,
+  },
+  startBtn: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  startBtnText: {
+    color: '#111',
+    fontSize: 15,
+    fontWeight: '500',
   },
 
-  // Stats row
-  statsRow: {
+  // ── Quick timer fields ───────────────────────────────────────────────────────
+  fieldsRow: {
     flexDirection: 'row',
-    marginBottom: 28,
+    gap: 8,
+    marginBottom: 14,
   },
-  statCol: {
+  field: {
     flex: 1,
-    gap: 4,
-  },
-  statColRight: {
-    alignItems: 'flex-end',
-  },
-  statDivider: {
-    width: 1,
     backgroundColor: 'rgba(255,255,255,0.08)',
-    marginHorizontal: 20,
+    borderRadius: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  statLabel: {
-    color: 'rgba(255,255,255,0.4)',
-    fontSize: 11,
-    fontWeight: '500',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-  statValue: {
-    color: '#ffffff',
+  fieldValue: {
     fontSize: 22,
     fontWeight: '500',
+    color: '#fff',
+    textAlign: 'center',
     fontVariant: ['tabular-nums'],
+    lineHeight: 40,
+  },
+  fieldLabel: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.4)',
+    textAlign: 'center',
+    marginTop: 2,
   },
 
-  // Controls
-  controls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  primaryBtn: {
-    flex: 1,
+  // ── Quick timer start ────────────────────────────────────────────────────────
+  startBtnLarge: {
     backgroundColor: '#fff',
-    paddingVertical: 16,
-    borderRadius: 8,
+    borderRadius: 12,
+    paddingVertical: 14,
     alignItems: 'center',
   },
-  primaryBtnText: {
+  startBtnLargeText: {
     color: '#111',
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 1.5,
-  },
-  secondaryBtn: {
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-  },
-  secondaryBtnText: {
-    color: 'rgba(255,255,255,0.6)',
     fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: 1.5,
+    fontWeight: '500',
+  },
+
+  // ── Presets ──────────────────────────────────────────────────────────────────
+  presetsSection: {
+    marginTop: 20,
+    marginHorizontal: -20,
+  },
+  presetsLabel: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.07 * 11,
+    color: 'rgba(255,255,255,0.4)',
+    marginBottom: 12,
+    marginHorizontal: 20,
+  },
+  presetsContent: {
+    paddingHorizontal: 20,
+    gap: 10,
+  },
+  presetCard: {
+    width: 120,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderTopWidth: 3,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  presetName: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#fff',
+  },
+  presetMeta: {
+    fontSize: 11,
+    color: 'rgba(255,255,255,0.35)',
+    marginTop: 4,
   },
 });

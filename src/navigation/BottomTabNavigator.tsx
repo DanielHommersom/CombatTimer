@@ -2,10 +2,10 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import SettingsScreen from '../screens/SettingsScreen';
-import TimerScreen    from '../screens/TimerScreen';
-import WorkoutScreen  from '../screens/WorkoutScreen';
+import ActiveTimerScreen from '../screens/ActiveTimerScreen';
+import SettingsScreen    from '../screens/SettingsScreen';
+import TimerScreen       from '../screens/TimerScreen';
+import WorkoutScreen     from '../screens/WorkoutScreen';
 import { Workout }    from '../types/workout';
 
 // ─── Param lists ─────────────────────────────────────────────────────────────
@@ -20,17 +20,6 @@ export type TabParamList = {
   Timer:    undefined;
   Settings: undefined;
 };
-
-// ─── Tab Timer placeholder ───────────────────────────────────────────────────
-
-function TimerTabPlaceholder() {
-  return (
-    <View style={styles.placeholder}>
-      <Ionicons name="timer-outline" size={40} color="rgba(255,255,255,0.15)" />
-      <Text style={styles.placeholderText}>Tap ▶ on a workout to begin</Text>
-    </View>
-  );
-}
 
 // ─── Tab navigator ────────────────────────────────────────────────────────────
 
@@ -81,7 +70,7 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Workout"  component={WorkoutScreen}       />
-      <Tab.Screen name="Timer"    component={TimerTabPlaceholder} />
+      <Tab.Screen name="Timer"    component={TimerScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen}      />
     </Tab.Navigator>
   );
@@ -95,7 +84,7 @@ export default function RootNavigator() {
       <Root.Screen name="MainTabs"    component={MainTabs} />
       <Root.Screen
         name="ActiveTimer"
-        component={TimerScreen}
+        component={ActiveTimerScreen}
         options={{
           animation:      'slide_from_bottom',
           gestureEnabled: false, // back handled via our own button + Alert
@@ -105,19 +94,3 @@ export default function RootNavigator() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
-const styles = StyleSheet.create({
-  placeholder: {
-    flex: 1,
-    backgroundColor: '#111',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-  },
-  placeholderText: {
-    color: 'rgba(255,255,255,0.3)',
-    fontSize: 14,
-    letterSpacing: 0.5,
-  },
-});
