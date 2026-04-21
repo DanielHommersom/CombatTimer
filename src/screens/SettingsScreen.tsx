@@ -1,13 +1,20 @@
 import Slider from '@react-native-community/slider';
+import { Ionicons } from '@expo/vector-icons';
 import React from 'react';
-import { StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
-import { audioManager } from '../logic/audioManager';
+import { audioManager, previewBellSound } from '../logic/audioManager';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const { soundsEnabled, setSoundsEnabled, volume, setVolume, vibrationEnabled, setVibrationEnabled } = useSettings();
+  const {
+    soundsEnabled, setSoundsEnabled,
+    volume, setVolume,
+    vibrationEnabled, setVibrationEnabled,
+    bellSound, setBellSound,
+  } = useSettings();
 
   const handleSoundsToggle = (value: boolean) => {
     setSoundsEnabled(value);
@@ -15,12 +22,17 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View style={[styles.root, { paddingTop: insets.top }]}>
+    <ScrollView
+      style={[styles.root, { paddingTop: insets.top }]}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
       <Text style={styles.screenTitle}>SETTINGS</Text>
 
       <View style={styles.section}>
         <Text style={styles.sectionHeader}>SOUND</Text>
 
+        {/* Timer sounds toggle */}
         <View style={styles.row}>
           <View style={styles.rowContent}>
             <Text style={styles.rowLabel}>Timer sounds</Text>
@@ -34,6 +46,7 @@ export default function SettingsScreen() {
           />
         </View>
 
+        {/* Volume slider */}
         {soundsEnabled && (
           <View style={styles.sliderRow}>
             <Text style={styles.sliderLabel}>Volume</Text>
@@ -52,6 +65,35 @@ export default function SettingsScreen() {
           </View>
         )}
 
+        {/* Bell sound selector */}
+        <View style={styles.bellSection}>
+          <Text style={styles.bellLabel}>Bell sound</Text>
+          <View style={styles.bellCards}>
+            {BELL_SOUNDS.map((bell, idx) => {
+              const selected = bellSound === bell.id;
+              return (
+                <View key={bell.id} style={idx < BELL_SOUNDS.length - 1 ? styles.bellCardWrap : styles.bellCardWrapLast}>
+                  <Pressable
+                    style={[styles.bellCard, selected && styles.bellCardSelected]}
+                    onPress={() => setBellSound(bell.id)}
+                  >
+                    <Text style={styles.bellCardLabel}>{bell.label}</Text>
+                    <Text style={styles.bellCardDesc}>{bell.description}</Text>
+                  </Pressable>
+                  <Pressable
+                    style={styles.previewBtn}
+                    onPress={() => previewBellSound(bell.id)}
+                    hitSlop={8}
+                  >
+                    <Ionicons name="volume-medium-outline" size={14} color="rgba(255,255,255,0.4)" />
+                  </Pressable>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* Vibration toggle */}
         <View style={[styles.row, styles.rowTop]}>
           <View style={styles.rowContent}>
             <Text style={styles.rowLabel}>Vibration</Text>
@@ -65,7 +107,7 @@ export default function SettingsScreen() {
           />
         </View>
       </View>
-    </View>
+    </ScrollView>
   );
 }
 
@@ -73,7 +115,10 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#111111',
+  },
+  content: {
     paddingHorizontal: 20,
+    paddingBottom: 40,
   },
   screenTitle: {
     color: '#ffffff',
@@ -102,6 +147,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     marginBottom: 2,
   },
+  rowTop: {
+    marginTop: 2,
+  },
   rowContent: {
     flex: 1,
     gap: 2,
@@ -122,6 +170,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 10,
+    marginBottom: 2,
   },
   sliderLabel: {
     color: '#ffffff',
@@ -133,14 +182,64 @@ const styles = StyleSheet.create({
     flex: 1,
     height: 36,
   },
-  rowTop: {
-    marginTop: 2,
-  },
   sliderValue: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 13,
     fontWeight: '500',
     width: 38,
     textAlign: 'right',
+  },
+  // ── Bell sound ────────────────────────────────────────────────────────────────
+  bellSection: {
+    marginBottom: 2,
+    marginTop: 2,
+  },
+  bellLabel: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '500',
+    marginBottom: 6,
+    marginLeft: 4,
+  },
+  bellCards: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  bellCardWrap: {
+    flex: 1,
+    gap: 4,
+  },
+  bellCardWrapLast: {
+    flex: 1,
+    gap: 4,
+  },
+  bellCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  bellCardSelected: {
+    backgroundColor: 'rgba(255,67,58,0.15)',
+    borderColor: 'rgba(255,67,58,0.5)',
+  },
+  bellCardLabel: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  bellCardDesc: {
+    color: 'rgba(255,255,255,0.4)',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  previewBtn: {
+    alignItems: 'center',
+    paddingVertical: 4,
   },
 });

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
 import * as Haptics from 'expo-haptics';
+import { BELL_SOUNDS } from '../data/bellSounds';
 import { SETTINGS_KEYS } from '../hooks/useSettings';
 
 type SoundKey = 'start' | 'warning' | 'rest' | 'finish';
@@ -86,4 +87,26 @@ export async function playPhaseTransition(): Promise<void> {
 export async function playRoundEnd(): Promise<void> {
   if (!(await vibrationEnabled())) return;
   await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+}
+
+export async function loadBellSound(): Promise<Audio.Sound> {
+  const selectedId = (await AsyncStorage.getItem(SETTINGS_KEYS.bellSound)) ?? 'boxing-bell';
+  const bell = BELL_SOUNDS.find((b) => b.id === selectedId) ?? BELL_SOUNDS[0];
+  const { sound } = await Audio.Sound.createAsync(bell.file);
+  return sound;
+}
+
+export async function previewBellSound(id: string): Promise<void> {
+  const bell = BELL_SOUNDS.find((b) => b.id === id) ?? BELL_SOUNDS[0];
+  try {
+    const volume = parseFloat((await AsyncStorage.getItem(SETTINGS_KEYS.volume)) ?? '0.8');
+    const { sound } = await Audio.Sound.createAsync(bell.file);
+    await sound.setVolumeAsync(volume);
+    await sound.playAsync();
+    sound.setOnPlaybackStatusUpdate((status) => {
+      if (status.isLoaded && status.didJustFinish) sound.unloadAsync();
+    });
+  } catch {
+    // Sound file not yet available — silently skip
+  }
 }
