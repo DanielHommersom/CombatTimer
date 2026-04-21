@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { audioManager } from '../logic/audioManager';
+import { audioManager, playPhaseTransition, playRoundEnd } from '../logic/audioManager';
 import { Phase, PhaseStep, calcRemainingFromSteps } from '../logic/timerEngine';
 import { Workout } from '../types/workout';
 
@@ -101,6 +101,9 @@ export function useTimerStore(): TimerStore {
 
       // Phase ended — advance
       const nextIdx = stepIdxRef.current + 1;
+      const endingStep = stepsRef.current[stepIdxRef.current];
+      if (endingStep?.phase === 'round') playRoundEnd();
+
       if (nextIdx >= stepsRef.current.length) {
         stopInterval();
         secsRef.current = 0;
@@ -108,6 +111,7 @@ export function useTimerStore(): TimerStore {
         setIsRunning(false);
         setIsDone(true);
         audioManager.playFinish();
+        playPhaseTransition();
       } else {
         const s = stepsRef.current[nextIdx];
         stepIdxRef.current = nextIdx;
@@ -117,8 +121,9 @@ export function useTimerStore(): TimerStore {
 
         if (s.phase !== prevPhaseRef.current) {
           prevPhaseRef.current = s.phase;
-          if (s.phase === 'round')    audioManager.playStart();
+          if (s.phase === 'round')     audioManager.playStart();
           else if (s.phase === 'rest') audioManager.playRest();
+          playPhaseTransition();
         }
       }
     }, 1000);

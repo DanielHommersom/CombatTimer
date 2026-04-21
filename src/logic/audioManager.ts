@@ -1,4 +1,7 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Audio } from 'expo-av';
+import * as Haptics from 'expo-haptics';
+import { SETTINGS_KEYS } from '../hooks/useSettings';
 
 type SoundKey = 'start' | 'warning' | 'rest' | 'finish';
 
@@ -32,6 +35,8 @@ class AudioManager {
   }
 
   async play(key: SoundKey): Promise<void> {
+    const raw = await AsyncStorage.getItem(SETTINGS_KEYS.soundsEnabled);
+    if (raw === 'false') return;
     if (!this.enabled) return;
 
     const config = SOUND_CONFIG[key];
@@ -43,6 +48,8 @@ class AudioManager {
           this.sounds[key] = loaded;
           sound = loaded;
         }
+        const volume = parseFloat((await AsyncStorage.getItem(SETTINGS_KEYS.volume)) ?? '0.8');
+        await sound.setVolumeAsync(volume);
         await sound.replayAsync();
       } catch {
         // Asset not available — silently skip
@@ -65,3 +72,18 @@ class AudioManager {
 }
 
 export const audioManager = new AudioManager();
+
+async function vibrationEnabled(): Promise<boolean> {
+  const raw = await AsyncStorage.getItem(SETTINGS_KEYS.vibrationEnabled);
+  return raw !== 'false';
+}
+
+export async function playPhaseTransition(): Promise<void> {
+  if (!(await vibrationEnabled())) return;
+  await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+}
+
+export async function playRoundEnd(): Promise<void> {
+  if (!(await vibrationEnabled())) return;
+  await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+}
