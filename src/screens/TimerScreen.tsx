@@ -11,11 +11,10 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import ActiveTimerBanner from '../components/ActiveTimerBanner';
 import TimePickerModal from '../components/TimePickerModal';
 import { PRESET_CATEGORIES, Preset } from '../data/presets';
-import { Phase } from '../logic/timerEngine';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
-import { useTimer } from '../store/TimerContext';
 import { Workout } from '../types/workout';
 
 type Nav = NativeStackNavigationProp<RootStackParamList>;
@@ -43,19 +42,6 @@ const QUICK_PRESETS: Preset[] = PRESET_CATEGORIES
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function fmtMSS(secs: number): string {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
-
-function phaseLabel(phase: Phase | null, round: number, total: number): string {
-  if (phase === 'round')    return `Round ${round} of ${total}`;
-  if (phase === 'rest')     return 'Rest';
-  if (phase === 'warmup')   return 'Warm-up';
-  if (phase === 'cooldown') return 'Cool-down';
-  return '';
-}
 
 export const startWorkout = async (
   workout: Workout,
@@ -103,6 +89,14 @@ function RoundsPicker({ value, onChange }: RoundsPickerProps) {
     onChange(next);
   }, [onChange]);
 
+  // Also snap on slow drag release (no momentum)
+  const handleDragEnd = useCallback((e: any) => {
+    const raw = e.nativeEvent.targetContentOffset?.x ?? e.nativeEvent.contentOffset.x;
+    const idx  = Math.round(raw / ROUND_ITEM_W);
+    const next = Math.max(1, Math.min(20, idx + 1));
+    onChange(next);
+  }, [onChange]);
+
   const renderItem = useCallback(({ item }: { item: number }) => (
     <View style={rpStyles.item}>
       <Text style={item === value ? rpStyles.selected : rpStyles.unselected}>
@@ -126,8 +120,10 @@ function RoundsPicker({ value, onChange }: RoundsPickerProps) {
         index,
       })}
       contentContainerStyle={{ paddingHorizontal: padding }}
+      extraData={value}
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
       onMomentumScrollEnd={handleScrollEnd}
+      onScrollEndDrag={handleDragEnd}
       renderItem={renderItem}
     />
   );
@@ -161,14 +157,6 @@ export default function TimerScreen() {
   const navigation = useNavigation<Nav>();
   const insets     = useSafeAreaInsets();
 
-  const {
-    isRunning,
-    activeWorkout,
-    currentPhase,
-    currentRound,
-    totalRounds,
-    secsLeft: storeSecsLeft,
-  } = useTimer();
 
   // ── Last session ────────────────────────────────────────────────────────────
   const [lastWorkout, setLastWorkout] = useState<Workout | null>(null);
@@ -244,20 +232,7 @@ export default function TimerScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
 
       {/* ── Active session banner ───────────────────────────────────────────── */}
-      {isRunning && activeWorkout && (
-        <Pressable
-          style={styles.banner}
-          onPress={() => navigation.navigate('ActiveTimer', { workout: activeWorkout })}
-        >
-          <Text style={styles.bannerBullet}>●</Text>
-          <Text style={styles.bannerLabel}>
-            {phaseLabel(currentPhase, currentRound, totalRounds)}
-            {'  —  '}
-            <Text style={styles.bannerTime}>{fmtMSS(storeSecsLeft)}</Text>
-          </Text>
-          <Text style={styles.bannerArrow}>›</Text>
-        </Pressable>
-      )}
+      <ActiveTimerBanner />
 
       {/* ── Scrollable content ──────────────────────────────────────────────── */}
       <ScrollView

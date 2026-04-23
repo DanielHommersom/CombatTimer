@@ -5,6 +5,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
+import ActiveTimerBanner from '../components/ActiveTimerBanner';
 import { audioManager, previewBellSound } from '../logic/audioManager';
 
 export default function SettingsScreen() {
@@ -22,11 +23,13 @@ export default function SettingsScreen() {
   };
 
   return (
-    <ScrollView
-      style={[styles.root, { paddingTop: insets.top }]}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
+    <View style={[styles.outer, { paddingTop: insets.top }]}>
+      <ActiveTimerBanner />
+      <ScrollView
+        style={styles.root}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+      >
       <Text style={styles.screenTitle}>SETTINGS</Text>
 
       <View style={styles.section}>
@@ -108,13 +111,17 @@ export default function SettingsScreen() {
         </View>
       </View>
     </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
+  outer: {
     flex: 1,
     backgroundColor: '#111111',
+  },
+  root: {
+    flex: 1,
   },
   content: {
     paddingHorizontal: 20,

@@ -25,6 +25,7 @@ import Animated, {
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
 import { Preset } from '../data/presets';
+import ActiveTimerBanner from '../components/ActiveTimerBanner';
 import TimePill from '../components/TimePill';
 import TimePickerModal from '../components/TimePickerModal';
 import WorkoutBreakdownBar from '../components/WorkoutBreakdownBar';
@@ -207,6 +208,7 @@ export default function WorkoutScreen() {
 
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
+      <ActiveTimerBanner />
       {/* Header */}
       <View style={styles.header}>
         <View>
