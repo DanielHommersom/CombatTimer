@@ -92,6 +92,7 @@ export async function playRoundEnd(): Promise<void> {
 export async function loadBellSound(): Promise<Audio.Sound> {
   const selectedId = (await AsyncStorage.getItem(SETTINGS_KEYS.bellSound)) ?? 'boxing-bell';
   const bell = BELL_SOUNDS.find((b) => b.id === selectedId) ?? BELL_SOUNDS[0];
+  if (!bell.file) throw new Error('Bell sound file not yet available');
   const { sound } = await Audio.Sound.createAsync(bell.file);
   return sound;
 }
@@ -100,6 +101,7 @@ export async function previewBellSound(id: string): Promise<void> {
   const bell = BELL_SOUNDS.find((b) => b.id === id) ?? BELL_SOUNDS[0];
   try {
     const volume = parseFloat((await AsyncStorage.getItem(SETTINGS_KEYS.volume)) ?? '0.8');
+    if (!bell.file) return;
     const { sound } = await Audio.Sound.createAsync(bell.file);
     await sound.setVolumeAsync(volume);
     await sound.playAsync();

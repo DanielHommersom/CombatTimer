@@ -1,7 +1,7 @@
 export interface BellSound {
   id:          string;
   label:       string;
-  file:        any;
+  file?:       any;
   description: string;
 }
 
