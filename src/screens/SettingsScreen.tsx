@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
-import { audioManager, previewBellSound } from '../logic/audioManager';
+import { previewBellSound } from '../logic/audioManager';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -19,7 +19,6 @@ export default function SettingsScreen() {
 
   const handleSoundsToggle = (value: boolean) => {
     setSoundsEnabled(value);
-    audioManager.setEnabled(value);
   };
 
   return (

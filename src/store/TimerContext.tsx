@@ -1,10 +1,16 @@
-import React, { createContext, useContext } from 'react';
+import React, { createContext, useContext, useEffect } from 'react';
+import { audioManager } from '../logic/audioManager';
 import { useTimerStore, TimerStore } from './useTimerStore';
 
 const TimerContext = createContext<TimerStore | null>(null);
 
 export function TimerProvider({ children }: { children: React.ReactNode }) {
   const store = useTimerStore();
+
+  useEffect(() => {
+    audioManager.init();
+  }, []);
+
   return <TimerContext.Provider value={store}>{children}</TimerContext.Provider>;
 }
 

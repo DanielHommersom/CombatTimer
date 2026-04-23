@@ -82,7 +82,7 @@ export function useTimerStore(): TimerStore {
     if (intervalRef.current !== null || stepsRef.current.length === 0) return;
 
     const step = stepsRef.current[stepIdxRef.current];
-    if (step?.phase === 'round' && elapsedRef.current === 0) audioManager.playStart();
+    if (stepIdxRef.current === 0 && elapsedRef.current === 0) audioManager.playStart();
     prevPhaseRef.current = step?.phase ?? null;
 
     setIsRunning(true);
@@ -121,8 +121,6 @@ export function useTimerStore(): TimerStore {
 
         if (s.phase !== prevPhaseRef.current) {
           prevPhaseRef.current = s.phase;
-          if (s.phase === 'round')     audioManager.playStart();
-          else if (s.phase === 'rest') audioManager.playRest();
           playPhaseTransition();
         }
       }
