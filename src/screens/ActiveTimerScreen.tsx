@@ -1,5 +1,7 @@
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AdEventType, InterstitialAd } from 'react-native-google-mobile-ads';
+import { AD_UNIT_IDS } from '../config/adConfig';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
@@ -19,6 +21,13 @@ import { RootStackParamList } from '../navigation/BottomTabNavigator';
 import { useTimer } from '../store/TimerContext';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ActiveTimer'>;
+
+// ─── Ads ──────────────────────────────────────────────────────────────────────
+
+const interstitial = InterstitialAd.createForAdRequest(
+  AD_UNIT_IDS.interstitial,
+  { requestNonPersonalizedAdsOnly: true },
+);
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -119,6 +128,22 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
       setActiveSession(workout, steps);
     }
   }, []);
+
+  // ── Interstitial ad ───────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsubscribe = interstitial.addAdEventListener(
+      AdEventType.LOADED,
+      () => interstitial.show(),
+    );
+    interstitial.load();
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    if (isDone) {
+      interstitial.load();
+    }
+  }, [isDone]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const safeIndex    = Math.min(currentStepIndex, steps.length - 1);

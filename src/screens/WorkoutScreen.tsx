@@ -22,6 +22,8 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
+import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { AD_UNIT_IDS } from '../config/adConfig';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
 import { Preset } from '../data/presets';
@@ -33,6 +35,7 @@ import TemplateScreen from './TemplateScreen';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
 
 type WorkoutNav = NativeStackNavigationProp<RootStackParamList>;
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -286,6 +289,14 @@ export default function WorkoutScreen() {
         onSelect={handleSelectPreset}
         onClose={() => setTemplateVisible(false)}
         lastWorkout={lastWorkout}
+      />
+
+      <BannerAd
+        unitId={AD_UNIT_IDS.banner}
+        size={BannerAdSize.BANNER}
+        requestOptions={{
+          requestNonPersonalizedAdsOnly: true,
+        }}
       />
     </View>
   );

@@ -17,6 +17,9 @@
       "bundleIdentifier": "com.digitaldiamonds.combattimer",
       "config": {
         "usesNonExemptEncryption": false
+      },
+      "infoPlist": {
+        "NSUserTrackingUsageDescription": "This identifier will be used to show you relevant ads."
       }
     },
     "android": {
@@ -35,6 +38,16 @@
         "projectId": "06e5cdfc-df38-4002-a591-981ca2c997d6"
       }
     },
-    "owner": "digital-diamonds"
+    "owner": "digital-diamonds",
+    "plugins": [
+      [
+        "react-native-google-mobile-ads",
+        {
+          "androidAppId": "ca-app-pub-3366446717708247~5105910064",
+          "iosAppId": "ca-app-pub-3366446717708247~5105910064"
+        }
+      ],
+      "expo-tracking-transparency"
+    ]
   }
 }
