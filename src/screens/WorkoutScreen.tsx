@@ -293,7 +293,7 @@ export default function WorkoutScreen() {
 
       <BannerAd
         unitId={AD_UNIT_IDS.banner}
-        size={BannerAdSize.ADAPTIVE_BANNER}
+        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
         requestOptions={{
           requestNonPersonalizedAdsOnly: true,
         }}
