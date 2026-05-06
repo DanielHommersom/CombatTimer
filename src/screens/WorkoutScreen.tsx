@@ -22,7 +22,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { BannerAd, BannerAdSize } from 'react-native-google-mobile-ads';
+import { BannerAd, BannerAdSize } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
@@ -293,7 +293,7 @@ export default function WorkoutScreen() {
 
       <BannerAd
         unitId={AD_UNIT_IDS.banner}
-        size={BannerAdSize.BANNER}
+        size={BannerAdSize.ADAPTIVE_BANNER}
         requestOptions={{
           requestNonPersonalizedAdsOnly: true,
         }}

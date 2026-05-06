@@ -1,11 +1,10 @@
 import { BottomSheetModalProvider } from '@gorhom/bottom-sheet';
 import { NavigationContainer } from '@react-navigation/native';
 import { StatusBar } from 'expo-status-bar';
-import { requestTrackingPermissionsAsync } from 'expo-tracking-transparency';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import mobileAds from 'react-native-google-mobile-ads';
+import { isExpoGo, mobileAds, requestTrackingPermissionsAsync } from './src/ads';
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { TimerProvider } from './src/store/TimerContext';
@@ -14,6 +13,7 @@ export default function App() {
   const [splashDone, setSplashDone] = useState(false);
 
   useEffect(() => {
+    if (isExpoGo) return;
     const initAds = async () => {
       await requestTrackingPermissionsAsync();
       await mobileAds().initialize();

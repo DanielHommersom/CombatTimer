@@ -1,6 +1,6 @@
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AdEventType, InterstitialAd } from 'react-native-google-mobile-ads';
+import { AdEventType, InterstitialAd } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
@@ -135,14 +135,12 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
       AdEventType.LOADED,
       () => interstitial.show(),
     );
-    interstitial.load();
     return unsubscribe;
   }, []);
 
   useEffect(() => {
-    if (isDone) {
-      interstitial.load();
-    }
+    if (!isDone) return;
+    interstitial.load();
   }, [isDone]);
 
   // ── Derived ───────────────────────────────────────────────────────────────
