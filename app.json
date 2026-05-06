@@ -19,7 +19,7 @@
         "usesNonExemptEncryption": false
       },
       "infoPlist": {
-        "NSUserTrackingUsageDescription": "This identifier will be used to show you relevant ads."
+        "NSUserTrackingUsageDescription": "We use your device identifier to show you relevant ads and to measure ad performance."
       }
     },
     "android": {
