@@ -7,6 +7,8 @@ import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
 import { previewBellSound } from '../logic/audioManager';
+import { BannerAd, BannerAdSize } from '../ads';
+import { AD_UNIT_IDS } from '../config/adConfig';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -110,6 +112,14 @@ export default function SettingsScreen() {
         </View>
       </View>
     </ScrollView>
+
+      <BannerAd
+        unitId={AD_UNIT_IDS.banner}
+        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+        requestOptions={{
+          requestNonPersonalizedAdsOnly: true,
+        }}
+      />
     </View>
   );
 }
