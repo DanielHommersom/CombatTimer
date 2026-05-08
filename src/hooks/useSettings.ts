@@ -6,6 +6,7 @@ export const SETTINGS_KEYS = {
   volume:           'setting_volume',
   vibrationEnabled: 'setting_vibration_enabled',
   bellSound:        'setting_bell_sound',
+  analyticsEnabled: 'setting_analytics_enabled',
 } as const;
 
 export interface Settings {
@@ -17,6 +18,8 @@ export interface Settings {
   setVibrationEnabled:  (value: boolean) => void;
   bellSound:            string;
   setBellSound:         (value: string) => void;
+  analyticsEnabled:     boolean;
+  setAnalyticsEnabled:  (value: boolean) => void;
 }
 
 export function useSettings(): Settings {
@@ -24,6 +27,7 @@ export function useSettings(): Settings {
   const [volume,           setVolumeState]            = useState(0.8);
   const [vibrationEnabled, setVibrationEnabledState] = useState(true);
   const [bellSound,        setBellSoundState]         = useState('boxing-bell');
+  const [analyticsEnabled, setAnalyticsEnabledState] = useState(true);
 
   useEffect(() => {
     AsyncStorage.multiGet([
@@ -31,11 +35,13 @@ export function useSettings(): Settings {
       SETTINGS_KEYS.volume,
       SETTINGS_KEYS.vibrationEnabled,
       SETTINGS_KEYS.bellSound,
-    ]).then(([[, rawEnabled], [, rawVolume], [, rawVibration], [, rawBell]]) => {
+      SETTINGS_KEYS.analyticsEnabled,
+    ]).then(([[, rawEnabled], [, rawVolume], [, rawVibration], [, rawBell], [, rawAnalytics]]) => {
       if (rawEnabled   !== null) setSoundsEnabledState(rawEnabled !== 'false');
       if (rawVolume    !== null) setVolumeState(parseFloat(rawVolume));
       if (rawVibration !== null) setVibrationEnabledState(rawVibration !== 'false');
       if (rawBell      !== null) setBellSoundState(rawBell);
+      if (rawAnalytics !== null) setAnalyticsEnabledState(rawAnalytics !== 'false');
     });
   }, []);
 
@@ -59,10 +65,16 @@ export function useSettings(): Settings {
     AsyncStorage.setItem(SETTINGS_KEYS.bellSound, value);
   };
 
+  const setAnalyticsEnabled = (value: boolean) => {
+    setAnalyticsEnabledState(value);
+    AsyncStorage.setItem(SETTINGS_KEYS.analyticsEnabled, value ? 'true' : 'false');
+  };
+
   return {
     soundsEnabled, setSoundsEnabled,
     volume, setVolume,
     vibrationEnabled, setVibrationEnabled,
     bellSound, setBellSound,
+    analyticsEnabled, setAnalyticsEnabled,
   };
 }

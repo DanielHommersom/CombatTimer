@@ -15,6 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.digitaldiamonds.combattimer",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -40,6 +41,8 @@
     },
     "owner": "digital-diamonds",
     "plugins": [
+      "./app.plugin",
+      "expo-build-properties",
       [
         "react-native-google-mobile-ads",
         {
@@ -47,7 +50,8 @@
           "iosAppId": "ca-app-pub-3366446717708247~5105910064"
         }
       ],
-      "expo-tracking-transparency"
+      "expo-tracking-transparency",
+      "@react-native-firebase/app"
     ]
   }
 }

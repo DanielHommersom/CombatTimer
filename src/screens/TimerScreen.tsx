@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
-import { BannerAd, BannerAdSize } from '../ads';
+import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import TimePickerModal from '../components/TimePickerModal';
 import { PRESET_CATEGORIES, Preset } from '../data/presets';
@@ -169,6 +169,12 @@ export default function TimerScreen() {
   const [qtRest,       setQtRest]      = useState(QT_DEFAULTS.rest);
   const [activePicker, setActivePicker] = useState<PickerField>(null);
 
+  // ── Screen view ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isExpoGo) return;
+    analytics().logScreenView({ screen_name: 'TimerScreen', screen_class: 'TimerScreen' });
+  }, []);
+
   // ── Load from AsyncStorage ──────────────────────────────────────────────────
   useEffect(() => {
     AsyncStorage.multiGet(['last_workout', 'quick_timer']).then(([[, lw], [, qt]]) => {
@@ -212,7 +218,15 @@ export default function TimerScreen() {
   };
 
   // ── Unified launch ────────────────────────────────────────────────────────
-  const launch = useCallback((workout: Workout) => {
+  const launch = useCallback((workout: Workout, presetName?: string) => {
+    if (!isExpoGo) {
+      analytics().logEvent('workout_started', {
+        workout_name: workout.name,
+        rounds: workout.rounds,
+        round_time: workout.roundTime,
+        preset: presetName ?? 'custom',
+      });
+    }
     startWorkout(workout, navigation);
   }, [navigation]);
 
@@ -296,7 +310,18 @@ export default function TimerScreen() {
             renderItem={({ item }) => (
               <Pressable
                 style={[styles.presetCard, { borderTopColor: item.color }]}
-                onPress={() => launch(presetToWorkout(item))}
+                onPress={() => {
+                  if (!isExpoGo) {
+                    const category = PRESET_CATEGORIES.find(
+                      (c) => c.presets.some((p) => p.id === item.id)
+                    )?.label ?? 'unknown';
+                    analytics().logEvent('preset_selected', {
+                      preset_name: item.name,
+                      category,
+                    });
+                  }
+                  launch(presetToWorkout(item), item.name);
+                }}
               >
                 <Text style={styles.presetName} numberOfLines={2}>{item.name}</Text>
                 <Text style={styles.presetMeta}>{item.rounds} × {item.roundTime}</Text>

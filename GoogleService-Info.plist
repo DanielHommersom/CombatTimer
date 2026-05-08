@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>API_KEY</key>
+	<string>AIzaSyCjz8YuH4lZzJn5VUY0U8tdDfJGG0yB5TQ</string>
+	<key>GCM_SENDER_ID</key>
+	<string>1074695969905</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.digitaldiamonds.combattimer</string>
+	<key>PROJECT_ID</key>
+	<string>combattimer-88efb</string>
+	<key>STORAGE_BUCKET</key>
+	<string>combattimer-88efb.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:1074695969905:ios:882ce76b700a39a2d50fd0</string>
+</dict>
+</plist>

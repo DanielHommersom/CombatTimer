@@ -1,26 +1,39 @@
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
 import { previewBellSound } from '../logic/audioManager';
-import { BannerAd, BannerAdSize } from '../ads';
+import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+
+  useEffect(() => {
+    if (isExpoGo) return;
+    analytics().logScreenView({ screen_name: 'SettingsScreen', screen_class: 'SettingsScreen' });
+  }, []);
   const {
     soundsEnabled, setSoundsEnabled,
     volume, setVolume,
     vibrationEnabled, setVibrationEnabled,
     bellSound, setBellSound,
+    analyticsEnabled, setAnalyticsEnabled,
   } = useSettings();
 
   const handleSoundsToggle = (value: boolean) => {
     setSoundsEnabled(value);
+  };
+
+  const handleAnalyticsToggle = async (value: boolean) => {
+    setAnalyticsEnabled(value);
+    if (!isExpoGo) {
+      await analytics().setAnalyticsCollectionEnabled(value);
+    }
   };
 
   return (
@@ -106,6 +119,22 @@ export default function SettingsScreen() {
           <Switch
             value={vibrationEnabled}
             onValueChange={setVibrationEnabled}
+            trackColor={{ false: 'rgba(255,255,255,0.12)', true: '#34c759' }}
+            thumbColor="#ffffff"
+          />
+        </View>
+      </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionHeader}>PRIVACY</Text>
+        <View style={styles.row}>
+          <View style={styles.rowContent}>
+            <Text style={styles.rowLabel}>Usage analytics</Text>
+            <Text style={styles.rowSub}>Help improve the app with anonymous data</Text>
+          </View>
+          <Switch
+            value={analyticsEnabled}
+            onValueChange={handleAnalyticsToggle}
             trackColor={{ false: 'rgba(255,255,255,0.12)', true: '#34c759' }}
             thumbColor="#ffffff"
           />

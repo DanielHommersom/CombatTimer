@@ -5,7 +5,7 @@ import {
   BottomSheetTextInput,
 } from '@gorhom/bottom-sheet';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -22,7 +22,7 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { BannerAd, BannerAdSize } from '../ads';
+import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
@@ -132,7 +132,8 @@ export default function WorkoutScreen() {
   const navigation = useNavigation<WorkoutNav>();
   const { workouts, loading, addWorkout, updateWorkout, deleteWorkout } = useWorkouts();
 
-  const sheetRef = useRef<BottomSheetModal>(null);
+  const sheetRef        = useRef<BottomSheetModal>(null);
+  const lastTemplateRef = useRef<string | null>(null);
   const [editing, setEditing]               = useState<Workout | null>(null);
   const [form, setForm]                     = useState<FormState>(EMPTY_FORM);
   const [activePicker, onPickerChange]      = useState<PickerField>(null);
@@ -140,6 +141,11 @@ export default function WorkoutScreen() {
   const [toastMsg, setToastMsg]             = useState('');
 
   const snapPoints = useMemo(() => SNAP_POINTS, []);
+
+  useEffect(() => {
+    if (isExpoGo) return;
+    analytics().logScreenView({ screen_name: 'WorkoutScreen', screen_class: 'WorkoutScreen' });
+  }, []);
 
   const lastWorkout = useMemo(
     () => workouts.length > 0
@@ -175,7 +181,15 @@ export default function WorkoutScreen() {
       await updateWorkout({ ...editing, ...data });
     } else {
       await addWorkout(data);
+      if (!isExpoGo) {
+        analytics().logEvent('workout_created', {
+          rounds: data.rounds,
+          round_time: data.roundTime,
+          used_template: lastTemplateRef.current ?? 'none',
+        });
+      }
     }
+    lastTemplateRef.current = null;
     sheetRef.current?.dismiss();
   }
 
@@ -196,6 +210,12 @@ export default function WorkoutScreen() {
       coolDown:  preset.coolDown,
       color:     preset.color,
     });
+    lastTemplateRef.current = preset ? preset.name : null;
+    if (!isExpoGo && preset) {
+      analytics().logEvent('preset_selected', {
+        preset_name: preset.name,
+      });
+    }
     setTemplateVisible(false);
     const msg = preset ? `${preset.name} loaded` : 'Starting fresh';
     setToastMsg(msg);
@@ -240,7 +260,17 @@ export default function WorkoutScreen() {
             <WorkoutCard
               workout={item}
               onEdit={() => openEdit(item)}
-              onPlay={() => navigation.navigate('ActiveTimer', { workout: item })}
+              onPlay={() => {
+                if (!isExpoGo) {
+                  analytics().logEvent('workout_started', {
+                    workout_name: item.name,
+                    rounds: item.rounds,
+                    round_time: item.roundTime,
+                    preset: 'custom',
+                  });
+                }
+                navigation.navigate('ActiveTimer', { workout: item });
+              }}
             />
           )}
         />

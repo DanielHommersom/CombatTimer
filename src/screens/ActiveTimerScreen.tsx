@@ -1,6 +1,6 @@
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
-import { AdEventType, InterstitialAd } from '../ads';
+import { analytics, AdEventType, InterstitialAd, isExpoGo } from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
@@ -140,6 +140,13 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     if (!isDone) return;
+    if (!isExpoGo) {
+      analytics().logEvent('workout_completed', {
+        workout_name: workout.name,
+        rounds: workout.rounds,
+        duration_seconds: elapsed,
+      });
+    }
     interstitial.load();
   }, [isDone]);
 

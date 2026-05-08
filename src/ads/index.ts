@@ -20,3 +20,14 @@ export const mobileAds: () => { initialize: () => Promise<void> } = isExpoGo
   : adsLib.default;
 
 export const { requestTrackingPermissionsAsync } = trackingLib;
+
+// Conditional require — Firebase native modules are not available in Expo Go
+const analyticsLib = isExpoGo
+  ? require('../mocks/firebaseAnalyticsMock')
+  : require('@react-native-firebase/analytics');
+
+export const analytics: () => {
+  setAnalyticsCollectionEnabled: (enabled: boolean) => Promise<void>;
+  logEvent: (name: string, params?: object) => Promise<void>;
+  logScreenView: (params: { screen_name: string; screen_class: string }) => Promise<void>;
+} = analyticsLib.default;

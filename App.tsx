@@ -4,7 +4,9 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { isExpoGo, mobileAds, requestTrackingPermissionsAsync } from './src/ads';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { analytics, isExpoGo, mobileAds, requestTrackingPermissionsAsync } from './src/ads';
+import { SETTINGS_KEYS } from './src/hooks/useSettings';
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { SplashScreen } from './src/screens/SplashScreen';
 import { TimerProvider } from './src/store/TimerContext';
@@ -19,6 +21,14 @@ export default function App() {
       await mobileAds().initialize();
     };
     initAds();
+  }, []);
+
+  useEffect(() => {
+    if (isExpoGo) return;
+    AsyncStorage.getItem(SETTINGS_KEYS.analyticsEnabled).then((val) => {
+      const enabled = val === null ? true : val !== 'false';
+      analytics().setAnalyticsCollectionEnabled(enabled);
+    });
   }, []);
 
   return (
