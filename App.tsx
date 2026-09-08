@@ -5,7 +5,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { analytics, isExpoGo, mobileAds, requestTrackingPermissionsAsync } from './src/ads';
+import { analytics, initAdsRemovedState, isExpoGo, mobileAds, requestTrackingPermissionsAsync } from './src/ads';
 import { SETTINGS_KEYS } from './src/hooks/useSettings';
 import BottomTabNavigator from './src/navigation/BottomTabNavigator';
 import { SplashScreen } from './src/screens/SplashScreen';
@@ -29,6 +29,13 @@ export default function App() {
       const enabled = val === null ? true : val !== 'false';
       analytics().setAnalyticsCollectionEnabled(enabled);
     });
+  }, []);
+
+  // Same cold-boot lifecycle as the mobileAds() init above: resolves the
+  // Combat Timer Pro entitlement once via RevenueCat so useCombatTimerPro()
+  // reflects reality as early as possible. No-ops safely in Expo Go.
+  useEffect(() => {
+    initAdsRemovedState();
   }, []);
 
   return (

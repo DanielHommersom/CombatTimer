@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { presentProPaywallIfNeeded, useCombatTimerPro } from '../ads';
 import { Preset, PRESET_CATEGORIES } from '../data/presets';
 import { Workout } from '../types/workout';
 
@@ -21,12 +22,28 @@ export interface TemplateScreenProps {
 
 // ─── PresetCard ───────────────────────────────────────────────────────────────
 
-function PresetCard({ preset, onPress }: { preset: Preset; onPress: () => void }) {
+function PresetCard({
+  preset,
+  locked,
+  onPress,
+}: {
+  preset: Preset;
+  locked: boolean;
+  onPress: () => void;
+}) {
   return (
     <Pressable style={styles.presetCard} onPress={onPress}>
       <View style={[styles.presetStrip, { backgroundColor: preset.color }]} />
       <View style={styles.presetBody}>
-        <Text style={styles.presetName}>{preset.name}</Text>
+        <View style={styles.presetNameRow}>
+          <Text style={styles.presetName}>{preset.name}</Text>
+          {locked && (
+            <View style={styles.proBadge}>
+              <Ionicons name="lock-closed" size={9} color="#111" />
+              <Text style={styles.proBadgeText}>PRO</Text>
+            </View>
+          )}
+        </View>
         <Text style={styles.presetDesc}>{preset.description}</Text>
         <Text style={styles.presetMeta}>
           {preset.rounds} rounds · {preset.roundTime} · {preset.rest} rest
@@ -42,6 +59,7 @@ function PresetCard({ preset, onPress }: { preset: Preset; onPress: () => void }
 export default function TemplateScreen({ visible, onSelect, onClose, lastWorkout }: TemplateScreenProps) {
   const insets = useSafeAreaInsets();
   const [activeCat, setActiveCat] = useState(PRESET_CATEGORIES[0].id);
+  const proActive = useCombatTimerPro();
 
   const activePresets = PRESET_CATEGORIES.find((c) => c.id === activeCat)?.presets ?? [];
 
@@ -58,6 +76,22 @@ export default function TemplateScreen({ visible, onSelect, onClose, lastWorkout
       color:       lastWorkout.color,
       description: '',
     });
+  }
+
+  // Pro templates are marked `pro: true` in src/data/presets.ts. A locked
+  // template opens the Paywall right from the card instead of loading it —
+  // if the user subscribes there, we go straight into that workout, so the
+  // upsell doesn't cost them the tap they already made.
+  async function handlePresetPress(preset: Preset) {
+    const locked = !!preset.pro && !proActive;
+    if (!locked) {
+      onSelect(preset);
+      return;
+    }
+    const outcome = await presentProPaywallIfNeeded();
+    if (outcome === 'purchased' || outcome === 'restored') {
+      onSelect(preset);
+    }
   }
 
   return (
@@ -106,7 +140,11 @@ export default function TemplateScreen({ visible, onSelect, onClose, lastWorkout
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           renderItem={({ item }) => (
-            <PresetCard preset={item} onPress={() => onSelect(item)} />
+            <PresetCard
+              preset={item}
+              locked={!!item.pro && !proActive}
+              onPress={() => handlePresetPress(item)}
+            />
           )}
           ListFooterComponent={
             <Pressable style={styles.scratchBtn} onPress={() => onSelect(null)}>
@@ -230,10 +268,30 @@ const styles = StyleSheet.create({
     paddingLeft: 14,
     gap: 3,
   },
+  presetNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   presetName: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '500',
+  },
+  proBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: '#ffd60a',
+    borderRadius: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  proBadgeText: {
+    color: '#111',
+    fontSize: 9,
+    fontWeight: '700',
+    letterSpacing: 0.4,
   },
   presetDesc: {
     color: 'rgba(255,255,255,0.4)',

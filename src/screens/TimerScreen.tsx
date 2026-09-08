@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
-import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
-import { AD_UNIT_IDS } from '../config/adConfig';
+import { analytics, isExpoGo } from '../ads';
+import AppBanner from '../components/AppBanner';
 import TimePickerModal from '../components/TimePickerModal';
 import { PRESET_CATEGORIES, Preset } from '../data/presets';
 import { RootStackParamList } from '../navigation/BottomTabNavigator';
@@ -349,13 +349,7 @@ export default function TimerScreen() {
         onClose={() => setActivePicker(null)}
       />
 
-      <BannerAd
-        unitId={AD_UNIT_IDS.banner}
-        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: true,
-        }}
-      />
+      <AppBanner />
     </View>
   );
 }

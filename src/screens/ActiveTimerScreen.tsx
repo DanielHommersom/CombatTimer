@@ -1,6 +1,16 @@
 import { useKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
-import { analytics, AdEventType, InterstitialAd, isExpoGo } from '../ads';
+import {
+  analytics,
+  AdEventType,
+  BannerAd,
+  BannerAdSize,
+  InterstitialAd,
+  RewardedAd,
+  RewardedAdEventType,
+  isExpoGo,
+  useCombatTimerPro,
+} from '../ads';
 import { AD_UNIT_IDS } from '../config/adConfig';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import React, { useEffect, useRef, useState } from 'react';
@@ -26,6 +36,12 @@ type Props = NativeStackScreenProps<RootStackParamList, 'ActiveTimer'>;
 
 const interstitial = InterstitialAd.createForAdRequest(
   AD_UNIT_IDS.interstitial,
+  { requestNonPersonalizedAdsOnly: true },
+);
+
+// "Watch to skip your next interstitial" offer.
+const rewardedAd = RewardedAd.createForAdRequest(
+  AD_UNIT_IDS.rewarded,
   { requestNonPersonalizedAdsOnly: true },
 );
 
@@ -112,13 +128,26 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
     elapsed,
     isRunning,
     isDone,
+    skipNextInterstitial,
     setActiveSession,
     startSession,
     pauseSession,
     resetSession,
     goToStep,
     clearActiveSession,
+    setSkipNextInterstitial,
   } = useTimer();
+
+  const proActive = useCombatTimerPro();
+  const [rewardedLoaded, setRewardedLoaded] = useState(false);
+
+  // Effects below fire only once per mount (`[]` / `[isDone]`, matching the
+  // rest of this file's style) — refs keep them reading fresh ads state
+  // without re-subscribing every time a purchase flips `proActive`.
+  const proActiveRef = useRef(proActive);
+  proActiveRef.current = proActive;
+  const skipNextRef = useRef(skipNextInterstitial);
+  skipNextRef.current = skipNextInterstitial;
 
   // ── Session init ──────────────────────────────────────────────────────────
   // Skip setActiveSession when resuming the same workout after minimize.
@@ -130,10 +159,15 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
   }, []);
 
   // ── Interstitial ad ───────────────────────────────────────────────────────
+  // Purchasers see zero interstitials, full stop — gated behind !proActive
+  // both here (in case a purchase completes between load() and LOADED) and
+  // at the call site below (which decides whether to load() at all).
   useEffect(() => {
     const unsubscribe = interstitial.addAdEventListener(
       AdEventType.LOADED,
-      () => interstitial.show(),
+      () => {
+        if (!proActiveRef.current) interstitial.show();
+      },
     );
     return unsubscribe;
   }, []);
@@ -147,8 +181,44 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
         duration_seconds: elapsed,
       });
     }
+
+    if (proActiveRef.current) return; // nothing to show, ever
+
+    if (skipNextRef.current) {
+      // Consume the earned skip once, resume normal behavior next time.
+      setSkipNextInterstitial(false);
+      return;
+    }
+
     interstitial.load();
   }, [isDone]);
+
+  // ── Rewarded ad: "watch to skip your next interstitial" ────────────────────
+  useEffect(() => {
+    const unsubLoaded = rewardedAd.addAdEventListener(RewardedAdEventType.LOADED, () => {
+      setRewardedLoaded(true);
+    });
+    const unsubError = rewardedAd.addAdEventListener(AdEventType.ERROR, () => {
+      // Offline / no fill / etc. — the offer just stays hidden, never crashes.
+      setRewardedLoaded(false);
+    });
+    const unsubEarned = rewardedAd.addAdEventListener(RewardedAdEventType.EARNED_REWARD, () => {
+      setSkipNextInterstitial(true);
+    });
+    rewardedAd.load();
+    return () => {
+      unsubLoaded();
+      unsubError();
+      unsubEarned();
+    };
+  }, []);
+
+  const handleWatchRewardedAd = () => rewardedAd.show();
+
+  // Nothing left to skip once ads are removed; don't offer a second skip
+  // while one is already banked for the next workout.
+  const showRewardedOffer =
+    isDone && !proActive && rewardedLoaded && !skipNextInterstitial;
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const safeIndex    = Math.min(currentStepIndex, steps.length - 1);
@@ -216,64 +286,87 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
   return (
     <LinearGradient
       colors={gradient}
-      style={[styles.root, { paddingTop: insets.top, paddingBottom: insets.bottom + 32 }]}
+      style={[styles.root, { paddingTop: insets.top }]}
     >
-      {/* ── Top bar ──────────────────────────────────────────────────────── */}
-      <View style={styles.topBar}>
-        <Pressable onPress={handleBack} hitSlop={12}>
-          <Text style={styles.stopText}>← Back</Text>
-        </Pressable>
-      </View>
-
-      {/* ── Main timer ───────────────────────────────────────────────────── */}
-      <View style={styles.displayArea}>
-        <Text style={[styles.timerText, { color }]}>{fmtMSS(secsLeft)}</Text>
-      </View>
-
-      {/* ── Progress bar ─────────────────────────────────────────────────── */}
-      <View style={styles.progressBg}>
-        <Animated.View style={[styles.progressFill, progressStyle, { backgroundColor: color }]} />
-      </View>
-
-      {/* ── Phase row ────────────────────────────────────────────────────── */}
-      <View style={styles.phaseRow}>
-        <ArrowButton direction="left"  disabled={prevDisabled} onPress={goPrev} />
-        <Text style={styles.phaseName}>{phaseLabel}</Text>
-        <ArrowButton direction="right" disabled={nextDisabled} onPress={goNext} />
-      </View>
-
-      <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
-
-      {/* ── Stats ────────────────────────────────────────────────────────── */}
-      <View style={styles.statsRow}>
-        <View style={styles.statCol}>
-          <Text style={styles.statLabel}>ELAPSED</Text>
-          <Text style={styles.statValue}>{fmtMSS(elapsed)}</Text>
+      <View style={[styles.content, { paddingBottom: insets.bottom + 32 }]}>
+        {/* ── Top bar ──────────────────────────────────────────────────────── */}
+        <View style={styles.topBar}>
+          <Pressable onPress={handleBack} hitSlop={12}>
+            <Text style={styles.stopText}>← Back</Text>
+          </Pressable>
         </View>
-        <View style={styles.statDivider} />
-        <View style={[styles.statCol, styles.statColRight]}>
-          <Text style={styles.statLabel}>REMAINING</Text>
-          <Text style={styles.statValue}>{fmtHMSS(remaining)}</Text>
-        </View>
-      </View>
 
-      {/* ── Controls ─────────────────────────────────────────────────────── */}
-      <View style={styles.controls}>
-        {showReset && (
-          <Pressable style={styles.secondaryBtn} onPress={handleReset}>
-            <Text style={styles.secondaryBtnText}>RESET</Text>
+        {/* ── Main timer ───────────────────────────────────────────────────── */}
+        <View style={styles.displayArea}>
+          <Text style={[styles.timerText, { color }]}>{fmtMSS(secsLeft)}</Text>
+        </View>
+
+        {/* ── Progress bar ─────────────────────────────────────────────────── */}
+        <View style={styles.progressBg}>
+          <Animated.View style={[styles.progressFill, progressStyle, { backgroundColor: color }]} />
+        </View>
+
+        {/* ── Phase row ────────────────────────────────────────────────────── */}
+        <View style={styles.phaseRow}>
+          <ArrowButton direction="left"  disabled={prevDisabled} onPress={goPrev} />
+          <Text style={styles.phaseName}>{phaseLabel}</Text>
+          <ArrowButton direction="right" disabled={nextDisabled} onPress={goNext} />
+        </View>
+
+        <Text style={styles.workoutSubtitle} numberOfLines={1}>{workout.name}</Text>
+
+        {/* ── Stats ────────────────────────────────────────────────────────── */}
+        <View style={styles.statsRow}>
+          <View style={styles.statCol}>
+            <Text style={styles.statLabel}>ELAPSED</Text>
+            <Text style={styles.statValue}>{fmtMSS(elapsed)}</Text>
+          </View>
+          <View style={styles.statDivider} />
+          <View style={[styles.statCol, styles.statColRight]}>
+            <Text style={styles.statLabel}>REMAINING</Text>
+            <Text style={styles.statValue}>{fmtHMSS(remaining)}</Text>
+          </View>
+        </View>
+
+        {/* ── Rewarded ad offer ───────────────────────────────────────────────
+            Only ever shown post-workout, before ads are removed, while a
+            rewarded ad is actually loaded and no skip is already banked. */}
+        {showRewardedOffer && (
+          <Pressable style={styles.rewardedBtn} onPress={handleWatchRewardedAd}>
+            <Text style={styles.rewardedBtnText}>Watch ad — skip your next interstitial</Text>
           </Pressable>
         )}
-        {isRunning ? (
-          <Pressable style={styles.primaryBtn} onPress={handlePause}>
-            <Text style={styles.primaryBtnText}>PAUSE</Text>
-          </Pressable>
-        ) : !isDone ? (
-          <Pressable style={styles.primaryBtn} onPress={handleStart}>
-            <Text style={styles.primaryBtnText}>{isAtStart ? 'START' : 'RESUME'}</Text>
-          </Pressable>
-        ) : null}
+        {isDone && !proActive && skipNextInterstitial && (
+          <Text style={styles.rewardedBanked}>Next interstitial will be skipped ✓</Text>
+        )}
+
+        {/* ── Controls ─────────────────────────────────────────────────────── */}
+        <View style={styles.controls}>
+          {showReset && (
+            <Pressable style={styles.secondaryBtn} onPress={handleReset}>
+              <Text style={styles.secondaryBtnText}>RESET</Text>
+            </Pressable>
+          )}
+          {isRunning ? (
+            <Pressable style={styles.primaryBtn} onPress={handlePause}>
+              <Text style={styles.primaryBtnText}>PAUSE</Text>
+            </Pressable>
+          ) : !isDone ? (
+            <Pressable style={styles.primaryBtn} onPress={handleStart}>
+              <Text style={styles.primaryBtnText}>{isAtStart ? 'START' : 'RESUME'}</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
+
+      {/* ── Bottom banner ad — free tier only ───────────────────────────── */}
+      {!proActive && (
+        <BannerAd
+          unitId={AD_UNIT_IDS.timerBanner}
+          size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
+          requestOptions={{ requestNonPersonalizedAdsOnly: true }}
+        />
+      )}
     </LinearGradient>
   );
 }
@@ -282,6 +375,9 @@ export default function ActiveTimerScreen({ route, navigation }: Props) {
 
 const styles = StyleSheet.create({
   root: {
+    flex: 1,
+  },
+  content: {
     flex: 1,
     paddingHorizontal: 24,
   },
@@ -303,10 +399,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   timerText: {
-    fontSize: 80,
+    fontSize: 108,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
-    letterSpacing: -3,
+    letterSpacing: -4,
     includeFontPadding: false,
   },
   progressBg: {
@@ -378,6 +474,28 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
+  },
+  rewardedBtn: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: 16,
+  },
+  rewardedBtnText: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  rewardedBanked: {
+    textAlign: 'center',
+    color: 'rgba(52,199,89,0.8)',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 16,
   },
   controls: {
     flexDirection: 'row',

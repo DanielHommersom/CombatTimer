@@ -4,6 +4,15 @@ Derived from `docs/designs/monetization-fill-the-gaps.md` (office-hours) and its
 `/plan-eng-review`. Locked decisions are noted inline — don't re-litigate them,
 just build.
 
+> **Implementation status (2026-08-25):** Sections 1-5 (all code) are implemented — see the diff on `main`. Section 0 (console/account setup) and Section 6 (manual device QA) are NOT done — they require actions only a human with store/account access can take. Placeholder values marked `TODO(§0)` in `src/config/adConfig.ts` (rewarded ad unit ID, RevenueCat API keys) must be replaced with real ones before this ships. See the summary in this session for the full punch list.
+
+> **⚠️ SUPERSEDED (2026-09-07) — this checklist no longer matches the app.** The plan below (one-time "Remove Ads" non-consumable, entitlement `no_ads`) has been replaced twice since 2026-08-25:
+> 1. A `combat_timer_pro` auto-renewable subscription (RevenueCat Paywall + Customer Center) was added *alongside* Remove Ads.
+> 2. The single monthly Pro plan was split into two durations: **Monthly €1.99** and **Yearly €11.99**, both under `combat_timer_pro`.
+> 3. The one-time **"Remove Ads" purchase was deleted from the app entirely.** `combat_timer_pro` is now the app's only paid entitlement, and subscribing to Pro (either duration) is what removes ads — see the doc comment above `COMBAT_TIMER_PRO_ENTITLEMENT_ID` in `src/config/adConfig.ts` and the entitlement-state comment block in `src/ads/index.ts` for the current source of truth.
+>
+> Everything in Sections 0-6 below that references "Remove Ads", the `no_ads` entitlement, or a non-consumable product is historical only — do not implement it. If you're picking this project back up, treat `src/ads/index.ts` and `src/config/adConfig.ts` as ground truth for what actually ships, not this file. In App Store Connect / Google Play Console: only the `combat_timer_pro` Monthly and Yearly auto-renewable products need to exist; any previously-created "Remove Ads" non-consumable product can be deleted or left unused — the app no longer references it.
+
 ## 0. Manual console setup (do first, blocks everything else)
 
 - [ ] Create a rewarded ad unit in the AdMob console (only banner + interstitial
@@ -22,59 +31,59 @@ just build.
 
 ## 1. Foundation — `src/ads/index.ts` (IAP + entitlement layer)
 
-- [ ] Add `react-native-purchases` (RevenueCat SDK) as a dependency
-- [ ] Add a module-level `_adsRemoved` boolean, default `false` (fail-safe: ads
+- [x] Add `react-native-purchases` (RevenueCat SDK) as a dependency
+- [x] Add a module-level `_adsRemoved` boolean, default `false` (fail-safe: ads
       show until proven otherwise)
-- [ ] Implement `useAdsRemoved()` with **`useSyncExternalStore`** — not a plain
+- [x] Implement `useAdsRemoved()` with **`useSyncExternalStore`** — not a plain
       function. A plain getter over a module-level variable will NOT trigger
       re-renders when purchase state changes; this was a real bug caught during
       review. Screens must re-render immediately post-purchase, no app restart.
-- [ ] Implement `initAdsRemovedState()` — calls RevenueCat's `getCustomerInfo()`
+- [x] Implement `initAdsRemovedState()` — calls RevenueCat's `getCustomerInfo()`
       once on cold boot (same lifecycle as the existing `mobileAds().initialize()`
       call in `App.tsx`), sets `_adsRemoved` from the `no_ads` entitlement, fires
       the `useSyncExternalStore` listeners
-- [ ] Implement `purchaseRemoveAds()`:
-  - [ ] Success → `_setAdsRemoved(true)`, notify listeners
-  - [ ] User-cancelled → reject, caller shows **no alert** (silent, user-initiated)
-  - [ ] Repeat purchase (already owned) → treat identically to success, no
+- [x] Implement `purchaseRemoveAds()`:
+  - [x] Success → `_setAdsRemoved(true)`, notify listeners
+  - [x] User-cancelled → reject, caller shows **no alert** (silent, user-initiated)
+  - [x] Repeat purchase (already owned) → treat identically to success, no
         special-case UI (store SDK guarantees no double-charge)
-  - [ ] Other failure (network, store error) → reject, caller shows an error Alert
-- [ ] Implement `restorePurchases()` with **3 distinct outcomes** (not 2):
-  - [ ] Entitlement found → resolves, `_setAdsRemoved(true)`, neutral success message
-  - [ ] Entitlement not found → resolves (this is a valid empty result, NOT an
+  - [x] Other failure (network, store error) → reject, caller shows an error Alert
+- [x] Implement `restorePurchases()` with **3 distinct outcomes** (not 2):
+  - [x] Entitlement found → resolves, `_setAdsRemoved(true)`, neutral success message
+  - [x] Entitlement not found → resolves (this is a valid empty result, NOT an
         error), neutral "nothing to restore" message
-  - [ ] Real failure (network/store error) → rejects, error Alert
-- [ ] Add `AD_UNIT_IDS.rewarded` to `src/config/adConfig.ts`
-- [ ] Export `RewardedAd`, `RewardedAdEventType` from the ads barrel — **use
+  - [x] Real failure (network/store error) → rejects, error Alert
+- [x] Add `AD_UNIT_IDS.rewarded` to `src/config/adConfig.ts`
+- [x] Export `RewardedAd`, `RewardedAdEventType` from the ads barrel — **use
       `RewardedAdEventType.LOADED`, not the shared `AdEventType.LOADED`** (a real
       pitfall found during search — different enum for rewarded vs interstitial)
 
 ## 2. Expo Go mock parity
 
-- [ ] Create `src/mocks/iapMock.ts` mirroring `src/mocks/googleMobileAdsMock.ts`'s
+- [x] Create `src/mocks/iapMock.ts` mirroring `src/mocks/googleMobileAdsMock.ts`'s
       pattern
-- [ ] `purchaseRemoveAds()`, `restorePurchases()`, `initAdsRemovedState()` all
+- [x] `purchaseRemoveAds()`, `restorePurchases()`, `initAdsRemovedState()` all
       safe no-op/resolve in the mock — plain `expo start` must not crash when
       tapping purchase/restore buttons (purchases require an EAS dev-client
       build, same constraint the existing ad mocks already work around)
-- [ ] Wire the mock into the existing `isExpoGo` conditional require in
+- [x] Wire the mock into the existing `isExpoGo` conditional require in
       `src/ads/index.ts`
 
 ## 3. DRY banner gating — `src/components/AppBanner.tsx` (new)
 
-- [ ] Create `AppBanner.tsx`: renders `null` if `useAdsRemoved()` is true,
+- [x] Create `AppBanner.tsx`: renders `null` if `useAdsRemoved()` is true,
       otherwise renders the existing `BannerAd` markup
-- [ ] Swap `<BannerAd unitId=... size=.../>` for `<AppBanner />` in:
-  - [ ] `src/screens/TimerScreen.tsx`
-  - [ ] `src/screens/WorkoutScreen.tsx`
-  - [ ] `src/screens/SettingsScreen.tsx`
+- [x] Swap `<BannerAd unitId=... size=.../>` for `<AppBanner />` in:
+  - [x] `src/screens/TimerScreen.tsx`
+  - [x] `src/screens/WorkoutScreen.tsx`
+  - [x] `src/screens/SettingsScreen.tsx`
 
 ## 4. Settings screen — purchase UI
 
-- [ ] Add "Remove Ads" button/row
-- [ ] Add "Restore Purchases" button/row (required for App Store review approval
+- [x] Add "Remove Ads" button/row
+- [x] Add "Restore Purchases" button/row (required for App Store review approval
       of any non-consumable IAP; standard practice on Play too)
-- [ ] Wire both to the `ads/index.ts` functions with the error handling above —
+- [x] Wire both to the `ads/index.ts` functions with the error handling above —
       distinguish cancel (silent) / not-found (neutral) / real failure (Alert)
 
 ## 5. `src/screens/ActiveTimerScreen.tsx` — interstitial gate + rewarded flow
@@ -83,18 +92,18 @@ This was the one piece of scope the initial architecture review missed — caugh
 by the outside-voice cross-model check. A "Remove Ads" purchase that doesn't
 actually remove the interstitial fails App Store review scrutiny.
 
-- [ ] Gate the existing interstitial `.show()` call behind `!useAdsRemoved()` —
+- [x] Gate the existing interstitial `.show()` call behind `!useAdsRemoved()` —
       purchasers see zero interstitials, full stop
-- [ ] Add the rewarded-ad "watch to skip your next interstitial" offer:
-  - [ ] `RewardedAd.createForAdRequest(AD_UNIT_IDS.rewarded, ...)`
-  - [ ] On `RewardedAdEventType.LOADED` → show
-  - [ ] On `RewardedAdEventType.EARNED_REWARD` → set a `skipNextInterstitial`
+- [x] Add the rewarded-ad "watch to skip your next interstitial" offer:
+  - [x] `RewardedAd.createForAdRequest(AD_UNIT_IDS.rewarded, ...)`
+  - [x] On `RewardedAdEventType.LOADED` → show
+  - [x] On `RewardedAdEventType.EARNED_REWARD` → set a `skipNextInterstitial`
         flag
-  - [ ] Next workout completion: if `skipNextInterstitial` is true, skip the
+  - [x] Next workout completion: if `skipNextInterstitial` is true, skip the
         interstitial once and reset the flag to `false`
-  - [ ] Rewarded ad fails to load (offline etc.) → offer is hidden/disabled,
+  - [x] Rewarded ad fails to load (offline etc.) → offer is hidden/disabled,
         never crashes the screen
-  - [ ] Rewarded offer should not appear at all once `useAdsRemoved()` is true —
+  - [x] Rewarded offer should not appear at all once `useAdsRemoved()` is true —
         nothing left to skip
 
 ## 6. Manual QA (no automated tests exist in this repo yet — see §7)

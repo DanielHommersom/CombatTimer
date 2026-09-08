@@ -1,17 +1,29 @@
 import Slider from '@react-native-community/slider';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useEffect } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { BELL_SOUNDS } from '../data/bellSounds';
 import { useSettings } from '../hooks/useSettings';
 import ActiveTimerBanner from '../components/ActiveTimerBanner';
+import AppBanner from '../components/AppBanner';
 import { previewBellSound } from '../logic/audioManager';
-import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
-import { AD_UNIT_IDS } from '../config/adConfig';
+import { APP_STORE_SHARE_URL, APP_STORE_WRITE_REVIEW_URL } from '../config/adConfig';
+import {
+  analytics,
+  isExpoGo,
+  presentCustomerCenter,
+  presentProPaywallIfNeeded,
+  restorePurchases,
+  useCombatTimerPro,
+} from '../ads';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const proActive = useCombatTimerPro();
+  const [proProcessing, setProProcessing] = useState(false);
+  const [managingSubscription, setManagingSubscription] = useState(false);
+  const [restoring, setRestoring] = useState(false);
 
   useEffect(() => {
     if (isExpoGo) return;
@@ -36,6 +48,82 @@ export default function SettingsScreen() {
     }
   };
 
+  // ── Combat Timer Pro (subscription) ─────────────────────────────────────
+  const handleGoPro = async () => {
+    if (proProcessing) return;
+    setProProcessing(true);
+    try {
+      const outcome = await presentProPaywallIfNeeded();
+      if (outcome === 'purchased') {
+        Alert.alert('Welcome to Pro', 'Combat Timer Pro is now active. Thanks for your support!');
+      } else if (outcome === 'restored') {
+        Alert.alert('Subscription restored', 'Your Combat Timer Pro subscription has been restored.');
+      } else if (outcome === 'error') {
+        Alert.alert(
+          'Something went wrong',
+          'Could not open the upgrade screen. Check your connection and try again.',
+        );
+      }
+      // 'cancelled' (user closed the paywall) and 'not_presented' (already
+      // Pro, or Expo Go) are silent — no alert needed either way.
+    } finally {
+      setProProcessing(false);
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    if (managingSubscription) return;
+    setManagingSubscription(true);
+    try {
+      await presentCustomerCenter();
+    } catch {
+      Alert.alert(
+        'Something went wrong',
+        'Could not open subscription management. Check your connection and try again.',
+      );
+    } finally {
+      setManagingSubscription(false);
+    }
+  };
+
+  // ── Restore Purchases ───────────────────────────────────────────────────
+  const handleRestorePurchases = async () => {
+    if (restoring) return;
+    setRestoring(true);
+    try {
+      const { restored } = await restorePurchases();
+      Alert.alert(
+        restored ? 'Purchases restored' : 'Nothing to restore',
+        restored
+          ? 'Your Combat Timer Pro subscription has been restored.'
+          : 'No previous purchases were found for this account.',
+      );
+    } catch {
+      Alert.alert('Restore failed', 'Could not restore purchases. Check your connection and try again.');
+    } finally {
+      setRestoring(false);
+    }
+  };
+
+  // ── Support: Write a review / Tell a friend ─────────────────────────────
+  const handleWriteReview = async () => {
+    try {
+      await Linking.openURL(APP_STORE_WRITE_REVIEW_URL);
+    } catch {
+      Alert.alert('Could not open the App Store', 'Please try again later.');
+    }
+  };
+
+  const handleTellAFriend = async () => {
+    const subject = encodeURIComponent('Check out CombatTimer');
+    const body = encodeURIComponent(`Check out this application: ${APP_STORE_SHARE_URL}`);
+    try {
+      await Linking.openURL(`mailto:?subject=${subject}&body=${body}`);
+    } catch {
+      Alert.alert('Could not open Mail', 'Please make sure you have a mail account set up on this device.');
+    }
+  };
+
   return (
     <View style={[styles.outer, { paddingTop: insets.top }]}>
       <ActiveTimerBanner />
@@ -45,6 +133,27 @@ export default function SettingsScreen() {
         showsVerticalScrollIndicator={false}
       >
       <Text style={styles.screenTitle}>SETTINGS</Text>
+
+      {/* Go Pro CTA — shortcut to the same paywall as the COMBAT TIMER PRO
+          section below; hidden once already subscribed. */}
+      {!proActive && (
+        <Pressable
+          style={[styles.proCta, proProcessing && styles.rowDisabled]}
+          onPress={handleGoPro}
+          disabled={proProcessing}
+        >
+          <View style={styles.proCtaIconWrap}>
+            <Ionicons name="flash" size={20} color="#ffd60a" />
+          </View>
+          <View style={styles.proCtaTextWrap}>
+            <Text style={styles.proCtaTitle}>Go Pro</Text>
+            <Text style={styles.proCtaSub}>
+              {proProcessing ? 'Opening…' : 'No ads and more templates'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.6)" />
+        </Pressable>
+      )}
 
       <View style={styles.section}>
         <Text style={styles.sectionHeader}>SOUND</Text>
@@ -126,6 +235,64 @@ export default function SettingsScreen() {
       </View>
 
       <View style={styles.section}>
+        <Text style={styles.sectionHeader}>COMBAT TIMER PRO</Text>
+
+        {proActive ? (
+          <View style={styles.row}>
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>Pro active</Text>
+              <Text style={styles.rowSub}>Thanks for subscribing to Combat Timer Pro</Text>
+            </View>
+            <Ionicons name="checkmark-circle" size={22} color="#34c759" />
+          </View>
+        ) : (
+          <Pressable
+            style={[styles.row, proProcessing && styles.rowDisabled]}
+            onPress={handleGoPro}
+            disabled={proProcessing}
+          >
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>Go Pro</Text>
+              <Text style={styles.rowSub}>
+                {proProcessing ? 'Opening…' : 'No ads and more templates'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+          </Pressable>
+        )}
+
+        {proActive && (
+          <Pressable
+            style={[styles.row, styles.rowTop, managingSubscription && styles.rowDisabled]}
+            onPress={handleManageSubscription}
+            disabled={managingSubscription}
+          >
+            <View style={styles.rowContent}>
+              <Text style={styles.rowLabel}>Manage Subscription</Text>
+              <Text style={styles.rowSub}>
+                {managingSubscription ? 'Opening…' : 'Change plan, cancel, or get purchase help'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+          </Pressable>
+        )}
+
+        <Pressable
+          style={[styles.row, styles.rowTop, restoring && styles.rowDisabled]}
+          onPress={handleRestorePurchases}
+          disabled={restoring}
+        >
+          <View style={styles.rowContent}>
+            <Text style={styles.rowLabel}>Restore Purchases</Text>
+            <Text style={styles.rowSub}>
+              {restoring ? 'Restoring…' : 'Already subscribed? Restore it here'}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+        </Pressable>
+      </View>
+
+      <View style={styles.section}>
         <Text style={styles.sectionHeader}>PRIVACY</Text>
         <View style={styles.row}>
           <View style={styles.rowContent}>
@@ -140,15 +307,29 @@ export default function SettingsScreen() {
           />
         </View>
       </View>
+
+      <View style={styles.section}>
+        <Text style={styles.sectionHeader}>SUPPORT</Text>
+
+        <Pressable style={styles.row} onPress={handleWriteReview}>
+          <View style={styles.rowContent}>
+            <Text style={styles.rowLabel}>Write a review</Text>
+            <Text style={styles.rowSub}>Rate CombatTimer on the App Store</Text>
+          </View>
+          <Ionicons name="star-outline" size={18} color="rgba(255,255,255,0.3)" />
+        </Pressable>
+
+        <Pressable style={[styles.row, styles.rowTop]} onPress={handleTellAFriend}>
+          <View style={styles.rowContent}>
+            <Text style={styles.rowLabel}>Tell a friend</Text>
+            <Text style={styles.rowSub}>Share CombatTimer by email</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.3)" />
+        </Pressable>
+      </View>
     </ScrollView>
 
-      <BannerAd
-        unitId={AD_UNIT_IDS.banner}
-        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: true,
-        }}
-      />
+      <AppBanner />
     </View>
   );
 }
@@ -173,6 +354,37 @@ const styles = StyleSheet.create({
     marginTop: 16,
     marginBottom: 32,
   },
+  proCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#34c759',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    gap: 12,
+    marginBottom: 32,
+  },
+  proCtaIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  proCtaTextWrap: {
+    flex: 1,
+    gap: 2,
+  },
+  proCtaTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  proCtaSub: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12,
+  },
   section: {
     marginBottom: 32,
   },
@@ -194,6 +406,9 @@ const styles = StyleSheet.create({
   },
   rowTop: {
     marginTop: 2,
+  },
+  rowDisabled: {
+    opacity: 0.5,
   },
   rowContent: {
     flex: 1,

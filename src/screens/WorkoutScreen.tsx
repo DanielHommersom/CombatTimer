@@ -22,8 +22,8 @@ import Animated, {
   useSharedValue,
   withSpring,
 } from 'react-native-reanimated';
-import { analytics, BannerAd, BannerAdSize, isExpoGo } from '../ads';
-import { AD_UNIT_IDS } from '../config/adConfig';
+import { analytics, isExpoGo } from '../ads';
+import AppBanner from '../components/AppBanner';
 import { useWorkouts } from '../hooks/useWorkouts';
 import { Workout } from '../types/workout';
 import { Preset } from '../data/presets';
@@ -321,13 +321,7 @@ export default function WorkoutScreen() {
         lastWorkout={lastWorkout}
       />
 
-      <BannerAd
-        unitId={AD_UNIT_IDS.banner}
-        size={BannerAdSize.ANCHORED_ADAPTIVE_BANNER}
-        requestOptions={{
-          requestNonPersonalizedAdsOnly: true,
-        }}
-      />
+      <AppBanner />
     </View>
   );
 }

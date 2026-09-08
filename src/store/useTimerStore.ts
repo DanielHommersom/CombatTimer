@@ -21,6 +21,12 @@ export interface TimerStore {
   currentPhase:     Phase | null;
   currentRound:     number;
   totalRounds:      number;
+  // Ads: earned-reward flag, set when a rewarded ad is watched at the end of
+  // one workout, consumed to skip the interstitial at the end of the next.
+  // Lives here (not in src/ads) because it needs to survive ActiveTimerScreen
+  // unmounting/remounting between workouts — same reason startSession lives
+  // in this store rather than as local screen state.
+  skipNextInterstitial: boolean;
   // Actions
   setActiveSession:   (workout: Workout, steps: PhaseStep[]) => void;
   startSession:       () => void;
@@ -28,6 +34,7 @@ export interface TimerStore {
   resetSession:       () => void;
   goToStep:           (index: number) => void;
   clearActiveSession: () => void;
+  setSkipNextInterstitial: (value: boolean) => void;
 }
 
 // ─── Hook (instantiated once inside TimerProvider at the app root) ────────────
@@ -40,6 +47,7 @@ export function useTimerStore(): TimerStore {
   const [elapsed, setElapsed]                   = useState(0);
   const [isRunning, setIsRunning]               = useState(false);
   const [isDone, setIsDone]                     = useState(false);
+  const [skipNextInterstitial, setSkipNextInterstitial] = useState(false);
 
   // Refs keep the interval callback free of stale closures
   const stepsRef     = useRef<PhaseStep[]>([]);
@@ -186,7 +194,9 @@ export function useTimerStore(): TimerStore {
     activeWorkout, steps,
     currentStepIndex, secsLeft, elapsed, isRunning, isDone,
     currentPhase, currentRound, totalRounds,
+    skipNextInterstitial,
     setActiveSession, startSession, pauseSession,
     resetSession, goToStep, clearActiveSession,
+    setSkipNextInterstitial,
   };
 }

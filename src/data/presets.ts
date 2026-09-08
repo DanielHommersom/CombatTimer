@@ -14,6 +14,10 @@ export interface Preset {
   coolDown: string;
   color: string;
   description: string;
+  // Combat Timer Pro exclusive — undefined/false means free. Gated in
+  // TemplateScreen.tsx via useCombatTimerPro(); tapping a `pro` preset
+  // without an active subscription opens the Paywall instead of loading it.
+  pro?: boolean;
 }
 
 export const PRESET_CATEGORIES: PresetCategory[] = [
@@ -53,6 +57,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '3:00',
         color: '#ff453a',
         description: 'Competition standard',
+        pro: true,
       },
     ],
   },
@@ -81,6 +86,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '3:00',
         color: '#bf5af2',
         description: 'UFC pro ruleset',
+        pro: true,
       },
       {
         id: 'bjj-rolling',
@@ -103,6 +109,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '2:00',
         color: '#ff9f0a',
         description: 'Intensive drill work',
+        pro: true,
       },
       {
         id: 'kickboxing',
@@ -125,6 +132,43 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '3:00',
         color: '#ff9f0a',
         description: 'Thai ruleset',
+        pro: true,
+      },
+      {
+        id: 'judo-randori',
+        name: 'Judo Randori',
+        rounds: 5,
+        roundTime: '4:00',
+        rest: '1:00',
+        warmUp: '5:00',
+        coolDown: '2:00',
+        color: '#bf5af2',
+        description: 'Grip fighting & throws',
+        pro: true,
+      },
+      {
+        id: 'karate-kumite',
+        name: 'Karate Kumite',
+        rounds: 3,
+        roundTime: '2:00',
+        rest: '1:00',
+        warmUp: '3:00',
+        coolDown: '2:00',
+        color: '#ff9f0a',
+        description: 'Point-sparring format',
+        pro: true,
+      },
+      {
+        id: 'savate',
+        name: 'Savate',
+        rounds: 5,
+        roundTime: '2:00',
+        rest: '1:00',
+        warmUp: '3:00',
+        coolDown: '2:00',
+        color: '#0a84ff',
+        description: 'French kickboxing ruleset',
+        pro: true,
       },
     ],
   },
@@ -164,6 +208,7 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '2:00',
         color: '#ffd60a',
         description: 'HIIT for fighters',
+        pro: true,
       },
       {
         id: 'endurance',
@@ -175,6 +220,30 @@ export const PRESET_CATEGORIES: PresetCategory[] = [
         coolDown: '3:00',
         color: '#0a84ff',
         description: 'Build stamina',
+        pro: true,
+      },
+      {
+        id: 'shadow-boxing-flow',
+        name: 'Shadow Boxing Flow',
+        rounds: 4,
+        roundTime: '5:00',
+        rest: '0:30',
+        warmUp: '3:00',
+        coolDown: '2:00',
+        color: '#34c759',
+        description: 'Long flowing rounds, minimal rest',
+      },
+      {
+        id: 'emom-combat',
+        name: 'EMOM Combat',
+        rounds: 10,
+        roundTime: '1:00',
+        rest: '0:00',
+        warmUp: '2:00',
+        coolDown: '2:00',
+        color: '#ffd60a',
+        description: 'Every-minute striking intervals',
+        pro: true,
       },
     ],
   },
