@@ -15,22 +15,38 @@ export const AD_UNIT_IDS = {
   timerBanner:  'ca-app-pub-3366446717708247/6424830127',
 };
 
-// NOTE: this key was provided directly (not pulled from the RevenueCat
-// dashboard) and is used as-is per instruction. RevenueCat's public SDK keys
-// are normally prefixed appl_ (iOS) / goog_ (Android) / amzn_ / strp_
-// depending on store — "test_..." doesn't match that pattern. Before
-// shipping to either store, confirm in RevenueCat > Project Settings >
-// API Keys that this is the intended key, and put the real per-platform
-// key in each slot below (a single shared key works for local testing but
-// is not how RevenueCat issues production keys).
+// Public Apple App Store key from RevenueCat > Project Settings > API Keys
+// (2026-09-08 — replaced the earlier `test_...` Test Store key, which only
+// works against fake Test Store products and was never valid for the real
+// combat_timer_pro Offering built in Product catalog).
+//
+// TODO: Android isn't shipped yet, so this slot still holds the old Test
+// Store key as a harmless placeholder — swap in a real `goog_...` key from
+// the same API Keys page before ever building for Android.
 const REVENUECAT_API_KEYS = {
-  ios:     'test_ByZLwHzcgyWHJyKAKskjwdGYRlo',
+  ios:     'appl_vKEyeufURhRkkxgRCOTWosQHdIh',
   android: 'test_ByZLwHzcgyWHJyKAKskjwdGYRlo',
 };
 
-export const REVENUECAT_API_KEY =
-  Platform.select({ ios: REVENUECAT_API_KEYS.ios, android: REVENUECAT_API_KEYS.android }) ??
-  REVENUECAT_API_KEYS.android;
+// (2026-09-09) — the real combat_timer_pro subscriptions aren't reachable
+// from App Store Connect yet (first-ever subscription group: still needs a
+// new app version submitted for review before StoreKit will serve them —
+// see the "SOS" section of the setup guide). Flip this to `true` locally to
+// route iOS to RevenueCat's Test Store instead, so you can test the full
+// purchase → entitlement → Pro-unlock flow in the meantime with fake,
+// instant purchases. Requires Test Store products (attached to the
+// `combat_timer_pro` entitlement, added to the current Offering) to exist
+// in the dashboard — see RevenueCat > Apps and providers > Test Store.
+//
+// ⚠️ MUST be `false` again before any TestFlight or App Store build —
+// Apple will reject/ignore a build configured with a Test Store key, and
+// RevenueCat explicitly warns to never ship one.
+const USE_TEST_STORE_FOR_LOCAL_TESTING = false;
+
+export const REVENUECAT_API_KEY = USE_TEST_STORE_FOR_LOCAL_TESTING
+  ? REVENUECAT_API_KEYS.android // the test_... Test Store key, reused here on purpose
+  : Platform.select({ ios: REVENUECAT_API_KEYS.ios, android: REVENUECAT_API_KEYS.android }) ??
+    REVENUECAT_API_KEYS.android;
 
 // ─── "Combat Timer Pro" (auto-renewable subscription, 2 durations) ─────────
 //
